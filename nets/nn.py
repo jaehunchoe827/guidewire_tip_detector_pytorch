@@ -24,14 +24,18 @@ def fuse_conv(conv, norm):
 
 
 class Conv(torch.nn.Module):
-    def __init__(self, in_ch, out_ch, activation, k=1, s=1, p=0, g=1):
+    def __init__(self, in_ch, out_ch, activation, k=1, s=1, p=0, g=1, use_norm = True):
         super().__init__()
         self.conv = torch.nn.Conv2d(in_ch, out_ch, k, s, p, groups=g, bias=False)
+        self.use_norm = use_norm
         self.norm = torch.nn.BatchNorm2d(out_ch, eps=0.001, momentum=0.03)
         self.relu = activation
 
     def forward(self, x):
-        return self.relu(self.norm(self.conv(x)))
+        x = self.conv(x)
+        if self.use_norm:
+            x = self.norm(x)
+        return self.relu(x)
 
     def fuse_forward(self, x):
         return self.relu(self.conv(x))
@@ -339,60 +343,124 @@ def yolo_v11_x(num_classes: int = 80):
 
 
 class GuidewireDetectionHead(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, input_image_shape: tuple, feature_channels: list, config_head: dict, from_logits: bool = True):
         super().__init__()
-        self.conv1 = Conv(64, 1, torch.nn.SiLU(), k=1)
-        self.conv2 = Conv(128, 1, torch.nn.SiLU(), k=1)
-        self.conv3 = Conv(256, 1, torch.nn.SiLU(), k=1)
-        self.conv4 = Conv(3, 1, torch.nn.Sigmoid(), k=1)
+        n_hidden_channels = config_head['num_hidden_channels']
+        self.input_image_shape = input_image_shape
+        self.feature_channels = feature_channels
+        self.num_convs_for_input_feature = config_head['num_convs_for_input_feature']
+        self.num_convs_for_shallow_feature = config_head['num_convs_for_shallow_feature']
+        self.num_convs_for_middle_feature = config_head['num_convs_for_middle_feature']
+        self.num_convs_for_deep_feature = config_head['num_convs_for_deep_feature']
+        self.num_convs_for_merged_feature = config_head['num_convs_for_merged_feature']
+        # input feature
+        self.convs_feature_input = torch.nn.ModuleList([Conv(3, n_hidden_channels, torch.nn.SiLU(), k=3, p=1)])
+        for _ in range(self.num_convs_for_input_feature-1):
+            self.convs_feature_input.append(Conv(n_hidden_channels, n_hidden_channels, torch.nn.SiLU(), k=3, p=1))
+        # shallow feature
+        self.convs_feature_1 = torch.nn.ModuleList([Conv(feature_channels[0], n_hidden_channels, torch.nn.SiLU(), k=3, p=1)])
+        for _ in range(self.num_convs_for_shallow_feature-1):
+            self.convs_feature_1.append(Conv(n_hidden_channels, n_hidden_channels, torch.nn.SiLU(), k=3, p=1))
+        # middle feature
+        self.convs_feature_2 = torch.nn.ModuleList([Conv(feature_channels[1], n_hidden_channels, torch.nn.SiLU(), k=3, p=1)])
+        for _ in range(self.num_convs_for_middle_feature-1):
+            self.convs_feature_2.append(Conv(n_hidden_channels, n_hidden_channels, torch.nn.SiLU(), k=3, p=1))
+        # deep feature
+        self.convs_feature_3 = torch.nn.ModuleList([Conv(feature_channels[2], n_hidden_channels, torch.nn.SiLU(), k=3, p=1)])
+        for _ in range(self.num_convs_for_deep_feature-1):
+            self.convs_feature_3.append(Conv(n_hidden_channels, n_hidden_channels, torch.nn.SiLU(), k=3, p=1))
+        # merged feature
+        self.convs_output = torch.nn.ModuleList([Conv(4*n_hidden_channels, n_hidden_channels, torch.nn.SiLU(), k=3, p=1)])
+        for _ in range(self.num_convs_for_merged_feature-2):
+            self.convs_output.append(Conv(n_hidden_channels, n_hidden_channels, torch.nn.SiLU(), k=3, p=1))
+        if from_logits:
+            self.convs_output.append(Conv(n_hidden_channels, 1, torch.nn.Identity(), k=3, p=1, use_norm=False))
+        else:
+            self.convs_output.append(Conv(n_hidden_channels, 1, torch.nn.Sigmoid(), k=3, p=1, use_norm=False))
         self.upsample2 = torch.nn.Upsample(scale_factor=2)
         self.upsample3 = torch.nn.Upsample(scale_factor=4)
 
     def forward(self, x):
-        # here the input is list of 3 tensors
-        x1 = self.conv1(x[0]) # feature from shallow layer. shape: (batch_size, 64, 80, 80)
-        x2 = self.conv2(x[1]) # feature from middle layer. shape: (batch_size, 128, 40, 40)
-        x3 = self.conv3(x[2]) # feature from deep layer. shape: (batch_size, 256, 20, 20)
+        # here the input is list of 4 tensors
+        # [input image, feature from shallow layer, feature from middle layer, feature from deep layer]
+        x0 = x[0] # input image. shape: (batch_size, 3, height, width)
+        for conv in self.convs_feature_input:
+            x0 = conv(x0)
+        x1 = x[1] # feature from shallow layer. shape: (batch_size, n_hidden_channels, 80, 80)
+        for conv in self.convs_feature_1:
+            x1 = conv(x1)
+        x2 = x[2] # feature from middle layer. shape: (batch_size, n_hidden_channels, 40, 40)
+        for conv in self.convs_feature_2:
+            x2 = conv(x2)
+        x3 = x[3] # feature from deep layer. shape: (batch_size, n_hidden_channels, 20, 20)
+        for conv in self.convs_feature_3:
+            x3 = conv(x3)
         # upsample the deep and middle layers
         x2 = self.upsample2(x2)
         x3 = self.upsample3(x3)
         # concatenate the features
-        x = torch.cat((x1, x2, x3), dim=1)
-        x = self.conv4(x)
+        x = torch.cat((x1, x2, x3), dim=1) # (batch_size, 3*n_hidden_channels, 80, 80)
+        # resize the x to (batch_size, 3*n_hidden_channels, input_image_shape[0], input_image_shape[1])
+        x = torch.nn.functional.interpolate(x,
+                                            size=(self.input_image_shape[0], self.input_image_shape[1]),
+                                            mode='bilinear', align_corners=False)
+        # concatenate x0 and x
+        x = torch.cat((x0, x), dim=1)
+        for conv in self.convs_output:
+            x = conv(x)
+        # (batch_size, 1, input_image_shape[0], input_image_shape[1]) ->
+        # (batch_size, input_image_shape[0], input_image_shape[1])
+        x = x.squeeze(1)
         return x
 
 
 class YOLOwithCustomHead(torch.nn.Module):
-    def __init__(self, name_of_yolo_model: str, pretrained_weights_path: str):
+    def __init__(self, name_of_yolo_model: str, pretrained_weights_path: str,
+                 input_image_shape: tuple, config_head: dict, from_logits: bool = True):
         super().__init__()
         # load the yolo model
         if name_of_yolo_model == 'yolo_v11_n':
             src_yolo_model = yolo_v11_n()
+            feature_channels = [64, 128, 256]
         elif name_of_yolo_model == 'yolo_v11_s':
             src_yolo_model = yolo_v11_s()
+            feature_channels = [128, 256, 512]
         elif name_of_yolo_model == 'yolo_v11_m':
             src_yolo_model = yolo_v11_m()
+            feature_channels = [256, 512, 512]
         elif name_of_yolo_model == 'yolo_v11_l':
             src_yolo_model = yolo_v11_l()
+            feature_channels = [256, 512, 512]
         elif name_of_yolo_model == 'yolo_v11_x':
             src_yolo_model = yolo_v11_x()
+            feature_channels = [384, 768, 768]
         else:
             raise ValueError(f'Invalid backbone: {name_of_yolo_model}')
         src_yolo_model.cuda()
         # load weights
         print(f'Loading weights from {pretrained_weights_path}')
         load_weight(src_yolo_model, pretrained_weights_path)
+
         # copy the net and fpn
         self.net = copy.deepcopy(src_yolo_model.net)
         self.fpn = copy.deepcopy(src_yolo_model.fpn)
-        self.head = GuidewireDetectionHead()
+        self.head = GuidewireDetectionHead(input_image_shape,
+                                           feature_channels,
+                                           config_head,
+                                           from_logits)
         # delete the original model
         del src_yolo_model
 
     def forward(self, x):
-        x = self.net(x)
-        x = self.fpn(x)
-        return self.head(list(x))
+        # first of all, convert the grayscale image to RGB image
+        x = x.repeat(1, 3, 1, 1)
+        # pass it to the backbone
+        y = self.net(x)
+        y = self.fpn(y)
+        # to custom head, we pass x (input image)
+        # together with y (output features)
+        z = [x] + list(y)
+        return self.head(z)
 
     def fuse(self):
         for m in self.modules():
@@ -402,41 +470,16 @@ class YOLOwithCustomHead(torch.nn.Module):
                 delattr(m, 'norm')
         return self
 
+    def freeze_backbone(self):
+        for param in self.net.parameters():
+            param.requires_grad = False
+        for param in self.fpn.parameters():
+            param.requires_grad = False
+        return self
 
-class YOLOwithoutHead(torch.nn.Module):
-    def __init__(self, name_of_yolo_model: str, pretrained_weights_path: str):
-        super().__init__()
-        # load the yolo model
-        if name_of_yolo_model == 'yolo_v11_n':
-            src_yolo_model = yolo_v11_n()
-        elif name_of_yolo_model == 'yolo_v11_s':
-            src_yolo_model = yolo_v11_s()
-        elif name_of_yolo_model == 'yolo_v11_m':
-            src_yolo_model = yolo_v11_m()
-        elif name_of_yolo_model == 'yolo_v11_l':
-            src_yolo_model = yolo_v11_l()
-        elif name_of_yolo_model == 'yolo_v11_x':
-            src_yolo_model = yolo_v11_x()
-        else:
-            raise ValueError(f'Invalid backbone: {name_of_yolo_model}')
-        src_yolo_model.cuda()
-        # load weights
-        load_weight(src_yolo_model, pretrained_weights_path)
-        # copy the net and fpn
-        self.net = copy.deepcopy(src_yolo_model.net)
-        self.fpn = copy.deepcopy(src_yolo_model.fpn)
-        # delete the original model
-        del src_yolo_model
-
-    def forward(self, x):
-        x = self.net(x)
-        x = self.fpn(x)
-        return list(x) # tuple to list
-
-    def fuse(self):
-        for m in self.modules():
-            if type(m) is Conv and hasattr(m, 'norm'):
-                m.conv = fuse_conv(m.conv, m.norm)
-                m.forward = m.fuse_forward
-                delattr(m, 'norm')
+    def unfreeze_backbone(self):
+        for param in self.net.parameters():
+            param.requires_grad = True
+        for param in self.fpn.parameters():
+            param.requires_grad = True
         return self

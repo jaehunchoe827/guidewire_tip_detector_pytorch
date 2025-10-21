@@ -1,40 +1,52 @@
 import os
+import cv2
 import sys
 import yaml
 import numpy
 import matplotlib.pyplot as plt
-
+import matplotlib.colors as colors
+import numpy as np
 # Add project root to Python path for model loading
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(script_dir)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
+
 from augmentation import pixel_coords as aug_functions
-from data_loader.guidewire_data_loader import GuidewireDataSet, GuidewireDataLoader
+from data_loader.guidewire_data_loader import GuidewireDataSet, GuidewireDataPreprocessor
 from utils import util
 
-def visualize_sample(sample, output_image_name: str):
-    image, label = sample
+
+def visualize_sample(dataset: GuidewireDataSet, index: int, output_image_name: str):
+    image, label = dataset.__getitem__(index, get_heatmap=False)
+    heatmap = dataset.convert_pixel_coord_to_heatmap(label)
     height, width = image.shape[:2]
     plt.figure(figsize=(10, 10), dpi=300)
     # plot original image and marked image side by side, and save the figure
     marked_image = image.copy()
-    x = round(label[0] * width)
-    y = round(label[1] * height)
+    x = round(label[0] * (width-1))
+    y = round(label[1] * (height-1))
     print('x: ', x, 'y: ', y)
     marker_size = 2
-    marked_image[y-marker_size:y+marker_size+1, x-marker_size:x+marker_size+1] = numpy.array([0, 255, 0])/255.0 # green color
-    plt.imshow(marked_image)
+    marked_image[y-marker_size:y+marker_size+1, x-marker_size:x+marker_size+1] = 1.0 # white color
+    image_heatmap_overlay = 1.0 * image + 0.5 * heatmap
+    image_heatmap_overlay = np.clip(image_heatmap_overlay, 0.0, 1.0)
+    # plot in grayscale (0~1)
+    plt.subplot(1, 2, 1)
+    plt.imshow(marked_image, cmap='gray')
+    plt.subplot(1, 2, 2)
+    plt.imshow(image_heatmap_overlay, cmap='gray')
     plt.axis('off')
     plt.savefig(output_image_name, bbox_inches='tight', pad_inches=0)
     plt.close()
+
 
 def test_augmentation(sample, output_folder: str):
     image, label = sample
     images = []
     labels = []
-    # brightness
+    # 1 brightness
     image_augmented, label_augmented = aug_functions.augment_brightness(
         image, label, 0.2
         )
@@ -42,7 +54,7 @@ def test_augmentation(sample, output_folder: str):
     labels.append(label_augmented)
     print(f"Applied augmentation: brightness")
     print(f"image_augmented shape: {image_augmented.shape}, label_augmented: {label_augmented}")
-    # horizontal flip
+    # 2 horizontal flip
     image_augmented, label_augmented = aug_functions.augment_horizontal_flip(
         image, label,
     )
@@ -50,7 +62,7 @@ def test_augmentation(sample, output_folder: str):
     labels.append(label_augmented)
     print(f"Applied augmentation: horizontal flip")
     print(f"image_augmented shape: {image_augmented.shape}, label_augmented: {label_augmented}")
-    # vertical flip
+    # 3 vertical flip
     image_augmented, label_augmented = aug_functions.augment_vertical_flip(
         image, label,
     )
@@ -58,9 +70,9 @@ def test_augmentation(sample, output_folder: str):
     labels.append(label_augmented)
     print(f"Applied augmentation: vertical flip")
     print(f"image_augmented shape: {image_augmented.shape}, label_augmented: {label_augmented}")
-    # gaussian noise
+    # 4 gaussian noise
     image_augmented, label_augmented = aug_functions.augment_gaussian_noise(
-        image, label, 0.1
+        image, label, 0.03
     )
     images.append(image_augmented)
     labels.append(label_augmented)
@@ -169,11 +181,13 @@ def test_augmentation(sample, output_folder: str):
         y_original = round(label[1] * image.shape[0])
         x_augmented = round(labels[i][0] * images[i].shape[1])
         y_augmented = round(labels[i][1] * images[i].shape[0])
-        image_original[y_original-marker_size:y_original+marker_size+1, x_original-marker_size:x_original+marker_size+1] = numpy.array([0, 255, 0])/255.0 # green color
-        image_augmented[y_augmented-marker_size:y_augmented+marker_size+1, x_augmented-marker_size:x_augmented+marker_size+1] = numpy.array([0, 255, 0])/255.0 # green color
-        plt.imshow(image_original)
+        image_original[y_original-marker_size:y_original+marker_size+1, 
+                       x_original-marker_size:x_original+marker_size+1] = 1.0 # white color
+        image_augmented[y_augmented-marker_size:y_augmented+marker_size+1,
+                        x_augmented-marker_size:x_augmented+marker_size+1] = 1.0 # white color
+        plt.imshow(image_original, cmap = 'gray')
         plt.subplot(1, 2, 2)
-        plt.imshow(image_augmented)
+        plt.imshow(image_augmented, cmap = 'gray')
         plt.axis('off')
         plt.savefig(os.path.join(output_folder, 'augmentation_test_'+str(i)+'.jpg'), bbox_inches='tight', pad_inches=0)
     plt.close()
@@ -185,7 +199,7 @@ if __name__ == '__main__':
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
     dataset_path = os.path.join(project_root, 'datasets', 'guidewire')
-    dataset = GuidewireDataLoader(dir_dataset=dataset_path, split_ratio=[0.8, 0.1, 0.1])
+    dataset = GuidewireDataPreprocessor(dir_dataset=dataset_path, split_ratio=[0.8, 0.1, 0.1])
     print(dataset.get_data_sample_names('train')[0])
     print(dataset.get_data_sample_names('val')[0])
     print(dataset.get_data_sample_names('test')[0])
@@ -201,7 +215,7 @@ if __name__ == '__main__':
     print('number of test samples: ', len(test_dataset))
     results_dir = os.path.join(project_root, 'results', 'dataset_test')
     os.makedirs(results_dir, exist_ok=True)
-    visualize_sample(train_dataset[0], os.path.join(results_dir, 'train_sample.jpg'))
-    visualize_sample(val_dataset[0], os.path.join(results_dir, 'val_sample.jpg'))
-    visualize_sample(test_dataset[0], os.path.join(results_dir, 'test_sample.jpg'))
-    test_augmentation(val_dataset[0], results_dir)
+    visualize_sample(train_dataset, 0, os.path.join(results_dir, 'train_sample.jpg'))
+    visualize_sample(val_dataset, 0, os.path.join(results_dir, 'val_sample.jpg'))
+    visualize_sample(test_dataset, 0, os.path.join(results_dir, 'test_sample.jpg'))
+    test_augmentation(val_dataset.__getitem__(0, get_heatmap=False, apply_default_noise=False), results_dir)

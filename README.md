@@ -1,17 +1,32 @@
 # Guidewire detection network.
 This repo is implemeted based on jahongir7174's [YOLOv11-pt](https://github.com/jahongir7174/YOLOv11-pt)
 
-### Installation
+# parameters
+1. yolo model size
+2. head # units, # conv layers
 
+## TODO
+0. consider using trainable upsamplers
+
+## Target
+1%_win_acc = 0.6191, and 2%_win_acc = 0.8231
+
+### Installation
 ```
 conda create -n guidewire_detector python=3.10.10
 conda activate guidewire_detector
 conda install pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia
-pip install opencv-python PyYAML tqdm thop
+pip install opencv-python PyYAML tqdm thop seaborn pandas
 ```
-
+After installation, you must add the following line to your ~/.bashrc
+```
+export CUBLAS_WORKSPACE_CONFIG=:16:8
+```
 ### Train
-
+* **For reproducibility**, you must uncomment the below line in utils.util.py
+    ```
+    # torch.use_deterministic_algorithms(True)
+    ```
 * Configure your dataset path in `main.py` for training
 * Run `bash main.sh $ --train` for training, `$` is number of GPUs
 
@@ -49,23 +64,25 @@ pip install opencv-python PyYAML tqdm thop
 * `*` means that it is from original repository, see reference
 * In the official YOLOv11 code, mask annotation information is used, which leads to higher performance
 
-### Dataset structure
 
-    ├── COCO 
+### Dataset structure
+    ├── datasets
         ├── images
-            ├── train2017
-                ├── 1111.jpg
-                ├── 2222.jpg
-            ├── val2017
-                ├── 1111.jpg
-                ├── 2222.jpg
-        ├── labels
-            ├── train2017
-                ├── 1111.txt
-                ├── 2222.txt
-            ├── val2017
-                ├── 1111.txt
-                ├── 2222.txt
+            ├── guidewire
+                ├── 01_04
+                    ├── Image
+                        ├── 1234.jpg
+                        ├── 2222.jpg (not all images have corresponding labels.)
+                        ├── 3333.jpg
+                    ├── Labels
+                        ├── 1234.jpg
+                        ├── 3333.jpg
+                ├── 05_09
+                    ├── Image
+                        ├── ...
+                    ├── Labels
+                        ├── ...
+                ├── ...
 
 #### Reference
 * https://github.com/jahongir7174/YOLOv11-pt

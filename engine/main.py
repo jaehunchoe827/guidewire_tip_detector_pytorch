@@ -6,9 +6,14 @@ import copy
 import tqdm
 import yaml
 import torch
+import random
+import numpy as np
 import warnings
 from argparse import ArgumentParser
 from torch.utils import data
+from data_loader.guidewire_data_loader import GuidewireDataPreprocessor, GuidewireDataSet
+from utils import training_utils
+from loss.loss import GuidewireHeatMapLoss
 
 # Add project root to Python path for model loading
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -16,293 +21,277 @@ project_root = os.path.dirname(script_dir)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
     
+
 from nets import nn
 from utils import util
+from utils import training_utils
 
 # warnings.filterwarnings("ignore")
-
 data_dir = '/home/jaehun/YOLOv11-pt-master/datasets/coco'
 
-def train(args, params):
-    # Model
-    model = nn.yolo_v11_n(len(params['names']))
+
+def train(config):
+    # create the model
+    name_backbone = config['backbone']
+    pretrained_weights_path = os.path.join(project_root, 'weights', f'{name_backbone}.pt')
+    model = nn.YOLOwithCustomHead(name_backbone,
+                                  pretrained_weights_path,
+                                  config['network']['input_image_shape'],
+                                  config['network']['head'],
+                                  from_logits=config['from_logits'])
     model.cuda()
+    model.freeze_backbone()
+    profile_model(model, config['network']['input_image_shape'])
+
+    # setup
+    epochs = config['training']['epochs']
+    batch_size = config['training']['batch_size']
+    accumulate = config['training']['accumulate']
+    unfreeze_backbone_epochs = config['training']['unfreeze_backbone_epochs']
+    is_backbone_unfrozen = False
 
     # Optimizer
-    accumulate = max(round(64 / (args.batch_size * args.world_size)), 1)
-    params['weight_decay'] *= args.batch_size * args.world_size * accumulate / 64
+    optimizer = training_utils.generate_optimizer(model, config['training']['optimizer'])
 
-    optimizer = torch.optim.SGD(util.set_params(model, params['weight_decay']),
-                                params['min_lr'], params['momentum'], nesterov=True)
+    # prepare dataset and loader
+    dataset_path = os.path.join(project_root, 'datasets', 'guidewire')
+    data_preprocessor = GuidewireDataPreprocessor(dir_dataset=dataset_path,
+                                                  split_ratio=config['dataset']['split_ratio'])
+    train_dataset = GuidewireDataSet(data_preprocessor.get_data_sample_names('train'),
+                                     apply_augmentation=True, config=config)
+    val_dataset = GuidewireDataSet(data_preprocessor.get_data_sample_names('val'),
+                                     apply_augmentation=False, config=config)
+    print (f"number of total samples: {data_preprocessor.n_total_samples}")
+    print (f"number of train samples: {len(train_dataset)}")
+    print (f"number of val samples: {len(val_dataset)}")
+    # deterministic seeding for DataLoader workers and shuffling
+    def seed_worker(worker_id):
+        worker_seed = torch.initial_seed() % 2**32
+        random.seed(worker_seed)
+        np.random.seed(worker_seed)
 
-    # EMA
-    ema = util.EMA(model) if args.local_rank == 0 else None
+    base_seed = config.get('seed', 0)
+    g = torch.Generator()
+    g.manual_seed(base_seed)
 
-    filenames = []
-    with open(f'{data_dir}/train2017.txt') as f:
-        for filename in f.readlines():
-            filename = os.path.basename(filename.rstrip())
-            filenames.append(f'{data_dir}/images/train2017/' + filename)
-
-    sampler = None
-    dataset = Dataset(filenames, args.input_size, params, augment=True)
-
-    if args.distributed:
-        sampler = data.distributed.DistributedSampler(dataset)
-
-    loader = data.DataLoader(dataset, args.batch_size, sampler is None, sampler,
-                             num_workers=8, pin_memory=True, collate_fn=Dataset.collate_fn)
+    # set num workers to # of cores - 2
+    loader = data.DataLoader(train_dataset, config['training']['batch_size'],
+                             shuffle=True, num_workers=os.cpu_count() - 2, pin_memory=True,
+                             collate_fn=GuidewireDataSet.collate_fn,
+                             worker_init_fn=seed_worker, generator=g)
+    val_loader = data.DataLoader(val_dataset, config['training']['batch_size'],
+                                 shuffle=False, num_workers=os.cpu_count() - 2, pin_memory=True,
+                                 collate_fn=GuidewireDataSet.collate_fn,
+                                 worker_init_fn=seed_worker, generator=g)
+    num_steps_per_epoch = len(loader)
+    print (f"number of steps per epoch: {num_steps_per_epoch}")
 
     # Scheduler
-    num_steps = len(loader)
-    scheduler = util.LinearLR(args, params, num_steps)
+    config['training']['lr_scheduler']['args']['unfreeze_backbone_epochs'] = unfreeze_backbone_epochs
+    scheduler = training_utils.generate_lr_scheduler(epochs, num_steps_per_epoch, config['training']['lr_scheduler'])
 
-    if args.distributed:
-        # DDP mode
-        model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
-        model = torch.nn.parallel.DistributedDataParallel(module=model,
-                                                          device_ids=[args.local_rank],
-                                                          output_device=args.local_rank)
-
-    best = 0
+    best_score = float('inf')
     amp_scale = torch.amp.GradScaler()
-    criterion = util.ComputeLoss(model, params)
+    results_dir = os.path.join(project_root, 'results', config['config_name'])
+    os.makedirs(results_dir, exist_ok=True)
 
-    with open('weights/step.csv', 'w') as log:
-        if args.local_rank == 0:
-            logger = csv.DictWriter(log, fieldnames=['epoch',
-                                                     'box', 'cls', 'dfl',
-                                                     'Recall', 'Precision', 'mAP@50', 'mAP'])
-            logger.writeheader()
+    # plot the lr scheduler
+    training_utils.plot_lr_scheduler(scheduler, os.path.join(results_dir, 'lr_scheduler.png'))
 
-        for epoch in range(args.epochs):
-            model.train()
-            if args.distributed:
-                sampler.set_epoch(epoch)
-            if args.epochs - epoch == 10:
-                loader.dataset.mosaic = False
+    # save the config
+    with open(os.path.join(results_dir, 'config.yaml'), 'w') as f:
+        yaml.dump(config, f)
 
-            p_bar = enumerate(loader)
+    criterion = GuidewireHeatMapLoss(from_logits=config['from_logits'])
+    
+    # Train
+    with open(os.path.join(results_dir, 'step.csv'), 'w') as log, \
+         open(os.path.join(results_dir, 'val_loss.csv'), 'w') as val_log:
+        # Get loss names dynamically from criterion
+        dummy_output = torch.zeros(1, 1, 1, 1)  # Dummy tensor to get loss names
+        dummy_target = torch.zeros(1, 1, 1, 1)
+        dummy_losses = criterion(dummy_output, dummy_target)
+        loss_names = list(dummy_losses.keys())
+        
+        # Define CSV headers dynamically
+        csv_headers = ['epoch', 'step', 'lr', 'loss_total'] + loss_names
+        writer = csv.writer(log)
+        writer.writerow(csv_headers)
+        
+        # Define CSV headers for validation losses (will be set after first validation)
+        val_writer = csv.writer(val_log)
+        val_headers_written = False
+        global_step = 0
+        model.train()
+        optimizer.zero_grad(set_to_none=True)
+        for epoch in range(1, epochs+1):
+            if epoch >= unfreeze_backbone_epochs and not is_backbone_unfrozen:
+                model.unfreeze_backbone()
+                is_backbone_unfrozen = True
+                print(f"Backbone unfreezed at epoch {epoch}")
 
-            if args.local_rank == 0:
-                print(('\n' + '%10s' * 5) % ('epoch', 'memory', 'box', 'cls', 'dfl'))
-                p_bar = tqdm.tqdm(p_bar, total=num_steps)
+            p_bar = tqdm.tqdm(loader, total=num_steps_per_epoch,
+                              desc=f"Epoch {epoch}/{epochs}", leave=False,
+                              ncols = 120)
+            for batch_index, (x, y) in enumerate(p_bar):
+                x = x.cuda(non_blocking=True)
+                y = y.cuda(non_blocking=True)
+                ## print shape of x and y
+                with torch.amp.autocast(device_type='cuda'):
+                    prediction = model(x)
+                    losses = criterion(prediction, y)
+                
+                # Calculate weighted total loss
+                loss_total = 0.0
+                for loss_name in config['training']['loss_main']:
+                    if loss_name in losses and loss_name in config['training']['loss_weights']:
+                        loss_total += config['training']['loss_weights'][loss_name] * losses[loss_name]
+                
+                # Scale loss for gradient accumulation (divide by accumulate)
+                loss_total = loss_total / accumulate
+                amp_scale.scale(loss_total).backward()
 
-            optimizer.zero_grad()
-            avg_box_loss = util.AverageMeter()
-            avg_cls_loss = util.AverageMeter()
-            avg_dfl_loss = util.AverageMeter()
-            for i, (samples, targets) in p_bar:
-
-                step = i + num_steps * epoch
-                scheduler.step(step, optimizer)
-
-                samples = samples.cuda().float() / 255
-
-                # Forward
-                with torch.amp.autocast('cuda'):
-                    outputs = model(samples)  # forward
-                    loss_box, loss_cls, loss_dfl = criterion(outputs, targets)
-
-                avg_box_loss.update(loss_box.item(), samples.size(0))
-                avg_cls_loss.update(loss_cls.item(), samples.size(0))
-                avg_dfl_loss.update(loss_dfl.item(), samples.size(0))
-
-                loss_box *= args.batch_size  # loss scaled by batch_size
-                loss_cls *= args.batch_size  # loss scaled by batch_size
-                loss_dfl *= args.batch_size  # loss scaled by batch_size
-                loss_box *= args.world_size  # gradient averaged between devices in DDP mode
-                loss_cls *= args.world_size  # gradient averaged between devices in DDP mode
-                loss_dfl *= args.world_size  # gradient averaged between devices in DDP mode
-
-                # Backward
-                amp_scale.scale(loss_box + loss_cls + loss_dfl).backward()
-
-                # Optimize
-                if step % accumulate == 0:
-                    # amp_scale.unscale_(optimizer)  # unscale gradients
-                    # util.clip_gradients(model)  # clip gradients
-                    amp_scale.step(optimizer)  # optimizer.step
+                # step on accumulation boundary
+                if (batch_index + 1) % accumulate == 0 or (batch_index + 1) == num_steps_per_epoch:
+                    amp_scale.step(optimizer)
                     amp_scale.update()
-                    optimizer.zero_grad()
-                    if ema:
-                        ema.update(model)
+                    optimizer.zero_grad(set_to_none=True)
+                
+                # scheduler step every iteration
+                scheduler.step(global_step, optimizer)
 
-                torch.cuda.synchronize()
+                # log
+                current_lr = optimizer.param_groups[0]['lr']
+                
+                # Prepare CSV row with all losses
+                csv_row = [epoch, global_step, current_lr, loss_total.item() * accumulate]
+                for loss_name in loss_names:
+                    if loss_name in losses:
+                        csv_row.append(losses[loss_name].item())
+                    else:
+                        csv_row.append(0.0)  # Default value if loss not computed
+                
+                writer.writerow(csv_row)
+                
+                # Update progress bar with key metrics
+                p_bar.set_postfix(
+                    loss=f"{(loss_total.item() * accumulate):.6f}", 
+                    lr=f"{current_lr:.6f}",
+                    acc2=f"{losses['2%_win_acc'].item():.4f}",
+                    acc1=f"{losses['1%_win_acc'].item():.4f}"
+                )
 
-                # Log
-                if args.local_rank == 0:
-                    memory = f'{torch.cuda.memory_reserved() / 1E9:.4g}G'  # (GB)
-                    s = ('%10s' * 2 + '%10.3g' * 3) % (f'{epoch + 1}/{args.epochs}', memory,
-                                                       avg_box_loss.avg, avg_cls_loss.avg, avg_dfl_loss.avg)
-                    p_bar.set_description(s)
+                # update global step
+                global_step += 1
 
-            if args.local_rank == 0:
-                # mAP
-                last = test(args, params, ema.ema)
+            # Validation at end of epoch
+            model.eval()
+            val_losses_sum = {}
+            num_val_batches = max(1, len(val_loader))
+            with torch.no_grad():
+                for x_val, y_val in val_loader:
+                    x_val = x_val.cuda(non_blocking=True)
+                    y_val = y_val.cuda(non_blocking=True)
+                    # for validation, we disable AMP to avoid precision issues
+                    with torch.amp.autocast(device_type='cuda', enabled=False):
+                        pred_val = model(x_val)
+                    val_losses = criterion(pred_val, y_val)
+                    
+                    # Accumulate validation losses
+                    for loss_name, loss_value in val_losses.items():
+                        if loss_name not in val_losses_sum:
+                            val_losses_sum[loss_name] = 0.0
+                        val_losses_sum[loss_name] += float(loss_value.item())
+            
+            # Calculate average validation losses
+            val_losses_avg = {loss_name: loss_sum / num_val_batches 
+                             for loss_name, loss_sum in val_losses_sum.items()}
+            
+            # Calculate weighted total validation loss
+            val_loss_total = 0.0
+            for loss_name in config['training']['loss_main']:
+                if loss_name in val_losses_avg and loss_name in config['training']['loss_weights']:
+                    val_loss_total += config['training']['loss_weights'][loss_name] * val_losses_avg[loss_name]
+            
+            print(f"Epoch {epoch}/{epochs} - val_loss_total: {val_loss_total:.6f}, "
+                  f"val_acc2: {val_losses_avg.get('2%_win_acc', 0):.5f}, "
+                  f"val_acc1: {val_losses_avg.get('1%_win_acc', 0):.5f}")
 
-                logger.writerow({'epoch': str(epoch + 1).zfill(3),
-                                 'box': str(f'{avg_box_loss.avg:.3f}'),
-                                 'cls': str(f'{avg_cls_loss.avg:.3f}'),
-                                 'dfl': str(f'{avg_dfl_loss.avg:.3f}'),
-                                 'mAP': str(f'{last[0]:.3f}'),
-                                 'mAP@50': str(f'{last[1]:.3f}'),
-                                 'Recall': str(f'{last[2]:.3f}'),
-                                 'Precision': str(f'{last[3]:.3f}')})
-                log.flush()
+            # Log validation losses to CSV
+            if not val_headers_written:
+                # Write headers dynamically based on available losses
+                val_csv_headers = ['epoch', 'val_loss_total'] + list(val_losses_avg.keys())
+                val_writer.writerow(val_csv_headers)
+                val_headers_written = True
+            
+            val_csv_row = [epoch, val_loss_total]
+            for loss_name, loss_value in val_losses_avg.items():
+                val_csv_row.append(loss_value)
+            val_writer.writerow(val_csv_row)
 
-                # Update best mAP
-                if last[0] > best:
-                    best = last[0]
+            # Save best checkpoint based on total validation loss
+            if val_loss_total < best_score:
+                best_score = val_loss_total
+                ckpt = {
+                    'model': model.state_dict(),
+                    'epoch': epoch,
+                    'score': best_score,
+                    'config': config,
+                }
+                torch.save(ckpt, os.path.join(results_dir, 'best.pt'))
 
-                # Save model
-                save = {'epoch': epoch + 1,
-                        'model': copy.deepcopy(ema.ema)}
-
-                # Save last, best and delete
-                torch.save(save, f='./weights/last.pt')
-                if best == last[0]:
-                    torch.save(save, f='./weights/best.pt')
-                del save
-
-    if args.local_rank == 0:
-        util.strip_optimizer('./weights/best.pt')  # strip optimizers
-        util.strip_optimizer('./weights/last.pt')  # strip optimizers
+            model.train()
+    return
 
 
-@torch.no_grad()
-def test(args, params, model=None):
-    filenames = []
-    with open(f'{data_dir}/val2017.txt') as f:
-        for filename in f.readlines():
-            filename = os.path.basename(filename.rstrip())
-            filenames.append(f'{data_dir}/images/val2017/' + filename)
-
-    dataset = Dataset(filenames, args.input_size, params, augment=False)
-    loader = data.DataLoader(dataset, batch_size=4, shuffle=False, num_workers=4,
-                             pin_memory=True, collate_fn=Dataset.collate_fn)
-
-    plot = False
-    if not model:
-        plot = True
-        model = torch.load(f='./weights/best.pt', map_location='cuda')
-        model = model['model'].float().fuse()
-
-    model.half()
+def profile_model(model, input_image_shape):
     model.eval()
-
-    # Configure
-    iou_v = torch.linspace(start=0.5, end=0.95, steps=10).cuda()  # iou vector for mAP@0.5:0.95
-    n_iou = iou_v.numel()
-
-    m_pre = 0
-    m_rec = 0
-    map50 = 0
-    mean_ap = 0
-    metrics = []
-    p_bar = tqdm.tqdm(loader, desc=('%10s' * 5) % ('', 'precision', 'recall', 'mAP50', 'mAP'))
-    for samples, targets in p_bar:
-        samples = samples.cuda()
-        samples = samples.half()  # uint8 to fp16/32
-        samples = samples / 255.  # 0 - 255 to 0.0 - 1.0
-        _, _, h, w = samples.shape  # batch-size, channels, height, width
-        scale = torch.tensor((w, h, w, h)).cuda()
-        # Inference
-        outputs = model(samples)
-        # NMS
-        outputs = util.non_max_suppression(outputs)
-        # Metrics
-        for i, output in enumerate(outputs):
-            idx = targets['idx'] == i
-            cls = targets['cls'][idx]
-            box = targets['box'][idx]
-
-            cls = cls.cuda()
-            box = box.cuda()
-
-            metric = torch.zeros(output.shape[0], n_iou, dtype=torch.bool).cuda()
-
-            if output.shape[0] == 0:
-                if cls.shape[0]:
-                    metrics.append((metric, *torch.zeros((2, 0)).cuda(), cls.squeeze(-1)))
-                continue
-            # Evaluate
-            if cls.shape[0]:
-                target = torch.cat(tensors=(cls, util.wh2xy(box) * scale), dim=1)
-                metric = util.compute_metric(output[:, :6], target, iou_v)
-            # Append
-            metrics.append((metric, output[:, 4], output[:, 5], cls.squeeze(-1)))
-
-    # Compute metrics
-    metrics = [torch.cat(x, dim=0).cpu().numpy() for x in zip(*metrics)]  # to numpy
-    if len(metrics) and metrics[0].any():
-        tp, fp, m_pre, m_rec, map50, mean_ap = util.compute_ap(*metrics, plot=plot, names=params["names"])
-    # Print results
-    print(('%10s' + '%10.3g' * 4) % ('', m_pre, m_rec, map50, mean_ap))
-    # Return results
-    model.float()  # for training
-    return mean_ap, map50, m_rec, m_pre
-
-
-def profile(args, params):
-    import thop
-    shape = (1, 3, args.input_size, args.input_size)
-    model = nn.yolo_v11_n(len(params['names'])).fuse()
-
-    model.eval()
-    model(torch.zeros(shape))
-
-    x = torch.empty(shape)
-    flops, num_params = thop.profile(model, inputs=[x], verbose=False)
-    flops, num_params = thop.clever_format(nums=[2 * flops, num_params], format="%.3f")
-
-    if args.local_rank == 0:
-        print(f'Number of parameters: {num_params}')
-        print(f'Number of FLOPs: {flops}')
+    # Add batch and color channel dimension: [H, W] -> [1, 1, H, W]
+    batch_input_shape = (1, 1) + tuple(input_image_shape)
+    
+    # Print total number of parameters
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f'Total parameters: {total_params:,}')
+    print(f'Trainable parameters: {trainable_params:,}')
+    
+    x = torch.randn(batch_input_shape).cuda()  # Move input to GPU
+    with torch.profiler.profile(
+        activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
+        record_shapes=True,
+        with_flops=True
+    ) as prof:
+        model(x)
+    print(prof.key_averages().table(sort_by="flops", row_limit=10))
+    return
 
 
 def main():
+    print('Start training...')
     parser = ArgumentParser()
-    parser.add_argument('--input-size', default=640, type=int)
-    parser.add_argument('--batch-size', default=32, type=int)
-    parser.add_argument('--local-rank', default=0, type=int)
-    parser.add_argument('--local_rank', default=0, type=int)
-    parser.add_argument('--epochs', default=600, type=int)
+    # here, the config path is relative to the project root / config folder
+    parser.add_argument('--config', default='default.yaml', type=str)
     parser.add_argument('--train', action='store_true')
     parser.add_argument('--test', action='store_true')
 
     args = parser.parse_args()
 
-    args.local_rank = int(os.getenv('LOCAL_RANK', 0))
-    args.world_size = int(os.getenv('WORLD_SIZE', 1))
-    args.distributed = int(os.getenv('WORLD_SIZE', 1)) > 1
+    config_path = os.path.join(project_root, 'config', args.config)
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
 
-    if args.distributed:
-        torch.cuda.set_device(device=args.local_rank)
-        torch.distributed.init_process_group(backend='nccl', init_method='env://')
+    config_name = args.config.split('.')[0]
+    config['config_name'] = config_name
 
-    if args.local_rank == 0:
-        if not os.path.exists('weights'):
-            os.makedirs('weights')
+    print('config loaded. number of keys: %d' % len(config.keys()))
 
-    with open('utils/args.yaml', errors='ignore') as f:
-        params = yaml.safe_load(f)
-
-    util.setup_seed()
     util.setup_multi_processes()
-
-    profile(args, params)
+    # set seed and deterministic behavior
+    seed_value = config.get('seed', 0)
+    util.setup_seed(seed_value)
 
     if args.train:
-        train(args, params)
-    if args.test:
-        test(args, params)
-
-    # Clean
-    if args.distributed:
-        torch.distributed.destroy_process_group()
-    torch.cuda.empty_cache()
-
+        train(config)
 
 if __name__ == "__main__":
     main()
