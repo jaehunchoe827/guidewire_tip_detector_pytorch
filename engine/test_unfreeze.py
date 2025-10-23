@@ -48,7 +48,7 @@ def train(config):
     epochs = config['training']['epochs']
     batch_size = config['training']['batch_size']
     accumulate = config['training']['accumulate']
-    unfreeze_backbone_epochs = config['training']['unfreeze_backbone_epochs']
+    unfreeze_backbone_epochs = 10000000
     is_backbone_unfrozen = False
 
     # Optimizer
@@ -126,10 +126,10 @@ def train(config):
         model.train()
         optimizer.zero_grad(set_to_none=True)
         for epoch in range(1, epochs+1):
-            if epoch >= unfreeze_backbone_epochs and not is_backbone_unfrozen:
-                model.unfreeze_backbone()
-                is_backbone_unfrozen = True
-                print(f"Backbone unfreezed at epoch {epoch}")
+            # if epoch >= unfreeze_backbone_epochs and not is_backbone_unfrozen:
+            #     model.unfreeze_backbone()
+            #     is_backbone_unfrozen = True
+            #     print(f"Backbone unfreezed at epoch {epoch}")
 
             p_bar = tqdm.tqdm(loader, total=num_steps_per_epoch,
                               desc=f"Epoch {epoch}/{epochs}", leave=False,
@@ -178,7 +178,7 @@ def train(config):
                 p_bar.set_postfix(
                     loss=f"{(loss_total.item() * accumulate):.6f}", 
                     lr=f"{current_lr:.6f}",
-                    acc5=f"{losses['5%_win_acc'].item():.4f}",
+                    acc2=f"{losses['2%_win_acc'].item():.4f}",
                     acc1=f"{losses['1%_win_acc'].item():.4f}"
                 )
 
@@ -215,7 +215,7 @@ def train(config):
                     val_loss_total += config['training']['loss_weights'][loss_name] * val_losses_avg[loss_name]
             
             print(f"Epoch {epoch}/{epochs} - val_loss_total: {val_loss_total:.6f}, "
-                  f"val_acc5: {val_losses_avg.get('5%_win_acc', 0):.5f}, "
+                  f"val_acc2: {val_losses_avg.get('2%_win_acc', 0):.5f}, "
                   f"val_acc1: {val_losses_avg.get('1%_win_acc', 0):.5f}")
 
             # Log validation losses to CSV
@@ -240,7 +240,15 @@ def train(config):
                     'config': config,
                 }
                 torch.save(ckpt, os.path.join(results_dir, 'best.pt'))
-
+    
+            # save checkpoint
+            ckpt = {
+                'model': model.state_dict(),
+                'epoch': epoch,
+                'score': val_loss_total,
+                'config': config,
+            }
+            torch.save(ckpt, os.path.join(results_dir, f'epoch_{epoch:04d}.pt'))
             model.train()
     return
 

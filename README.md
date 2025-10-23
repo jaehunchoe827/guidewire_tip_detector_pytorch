@@ -11,6 +11,25 @@ This repo is implemeted based on jahongir7174's [YOLOv11-pt](https://github.com/
 ## Target
 1%_win_acc = 0.6191, and 2%_win_acc = 0.8231
 
+## best so far : using bilinear upsampling
+(guidewire_detector) jaehun@jh22:~/workspace/guidewire_tip_detector_pytorch$ python3 -m engine.test_unfreeze --train --config wider_head.yaml
+Start training...
+config loaded. number of keys: 6
+Loading weights from /home/jaehun/workspace/guidewire_tip_detector_pytorch/weights/yolo_v11_s.pt
+Total parameters: 10,051,266
+Trainable parameters: 10,051,266
+Epoch 1/30 - val_loss_total: 0.001040, val_acc5: 0.57946, val_acc1: 0.47203                                             
+Epoch 2/30 - val_loss_total: 0.000727, val_acc5: 0.76449, val_acc1: 0.65756                                             
+Epoch 3/30 - val_loss_total: 0.000749, val_acc5: 0.72626, val_acc1: 0.63038                                             
+Epoch 4/30 - val_loss_total: 0.000748, val_acc5: 0.73781, val_acc1: 0.63432                                             
+Backbone unfreezed at epoch 5
+Epoch 5/30 - val_loss_total: 0.001147, val_acc5: 0.61976, val_acc1: 0.52933                                             
+Epoch 6/30 - val_loss_total: 0.000698, val_acc5: 0.77854, val_acc1: 0.67556                                             
+Epoch 7/30 - val_loss_total: 0.000830, val_acc5: 0.65548, val_acc1: 0.55149                                             
+Epoch 8/30 - val_loss_total: 0.000696, val_acc5: 0.80020, val_acc1: 0.69256                                             
+Epoch 9/30 - val_loss_total: 0.000641, val_acc5: 0.81411, val_acc1: 0.71264    
+
+
 ### Installation
 ```
 conda create -n guidewire_detector python=3.10.10

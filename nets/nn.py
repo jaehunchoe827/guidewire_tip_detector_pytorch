@@ -28,7 +28,9 @@ class Conv(torch.nn.Module):
         super().__init__()
         self.conv = torch.nn.Conv2d(in_ch, out_ch, k, s, p, groups=g, bias=False)
         self.use_norm = use_norm
-        self.norm = torch.nn.BatchNorm2d(out_ch, eps=0.001, momentum=0.03)
+        # here the eps and momentum are set to its default values
+        # pytorch defaults: eps=1e-5, momentum=0.1
+        self.norm = torch.nn.BatchNorm2d(out_ch, eps=1e-5, momentum=0.1)
         self.relu = activation
 
     def forward(self, x):
@@ -352,7 +354,10 @@ class GuidewireDetectionHead(torch.nn.Module):
         self.num_convs_for_shallow_feature = config_head['num_convs_for_shallow_feature']
         self.num_convs_for_middle_feature = config_head['num_convs_for_middle_feature']
         self.num_convs_for_deep_feature = config_head['num_convs_for_deep_feature']
-        self.num_convs_for_merged_feature = config_head['num_convs_for_merged_feature']
+        self.num_convs_for_merged_feature_1 = config_head['num_convs_for_merged_feature_1']
+        self.num_convs_for_merged_feature_2 = config_head['num_convs_for_merged_feature_2']
+        self.num_convs_for_merged_feature_3 = config_head['num_convs_for_merged_feature_3']
+        self.num_convs_for_output = config_head['num_convs_for_output']
         # input feature
         self.convs_feature_input = torch.nn.ModuleList([Conv(3, n_hidden_channels, torch.nn.SiLU(), k=3, p=1)])
         for _ in range(self.num_convs_for_input_feature-1):
@@ -369,16 +374,30 @@ class GuidewireDetectionHead(torch.nn.Module):
         self.convs_feature_3 = torch.nn.ModuleList([Conv(feature_channels[2], n_hidden_channels, torch.nn.SiLU(), k=3, p=1)])
         for _ in range(self.num_convs_for_deep_feature-1):
             self.convs_feature_3.append(Conv(n_hidden_channels, n_hidden_channels, torch.nn.SiLU(), k=3, p=1))
+        # upsample the deep and middle layers
+        self.upsample_feature2 = torch.nn.Upsample(scale_factor=2, mode='bilinear')
+        self.upsample_feature3 = torch.nn.Upsample(scale_factor=4, mode='bilinear')
         # merged feature
-        self.convs_output = torch.nn.ModuleList([Conv(4*n_hidden_channels, n_hidden_channels, torch.nn.SiLU(), k=3, p=1)])
-        for _ in range(self.num_convs_for_merged_feature-2):
+        self.upsample_merged_feature_1 = torch.nn.Upsample(scale_factor=2, mode='bilinear') # (80, 80) -> (160, 160)
+        self.convs_merged_feature_1 = torch.nn.ModuleList([Conv(n_hidden_channels, n_hidden_channels, torch.nn.SiLU(), k=3, p=1)])
+        for _ in range(self.num_convs_for_merged_feature_1-1):
+            self.convs_merged_feature_1.append(Conv(n_hidden_channels, n_hidden_channels, torch.nn.SiLU(), k=3, p=1))
+        self.upsample_merged_feature_2 = torch.nn.Upsample(scale_factor=2, mode='bilinear') # (160, 160) -> (320, 320)
+        self.convs_merged_feature_2 = torch.nn.ModuleList([Conv(n_hidden_channels, n_hidden_channels, torch.nn.SiLU(), k=3, p=1)])
+        for _ in range(self.num_convs_for_merged_feature_2-1):
+            self.convs_merged_feature_2.append(Conv(n_hidden_channels, n_hidden_channels, torch.nn.SiLU(), k=3, p=1))
+        self.upsample_merged_feature_3 = torch.nn.Upsample(scale_factor=2, mode='bilinear') # (320, 320) -> (640, 640)
+        self.convs_merged_feature_3 = torch.nn.ModuleList([Conv(n_hidden_channels, n_hidden_channels, torch.nn.SiLU(), k=3, p=1)])
+        for _ in range(self.num_convs_for_merged_feature_3-1):
+            self.convs_merged_feature_3.append(Conv(n_hidden_channels, n_hidden_channels, torch.nn.SiLU(), k=3, p=1))
+        # output conv layers
+        self.convs_output = torch.nn.ModuleList([Conv(n_hidden_channels, n_hidden_channels, torch.nn.SiLU(), k=3, p=1)])
+        for _ in range(self.num_convs_for_output-2):
             self.convs_output.append(Conv(n_hidden_channels, n_hidden_channels, torch.nn.SiLU(), k=3, p=1))
         if from_logits:
             self.convs_output.append(Conv(n_hidden_channels, 1, torch.nn.Identity(), k=3, p=1, use_norm=False))
         else:
             self.convs_output.append(Conv(n_hidden_channels, 1, torch.nn.Sigmoid(), k=3, p=1, use_norm=False))
-        self.upsample2 = torch.nn.Upsample(scale_factor=2)
-        self.upsample3 = torch.nn.Upsample(scale_factor=4)
 
     def forward(self, x):
         # here the input is list of 4 tensors
@@ -396,16 +415,28 @@ class GuidewireDetectionHead(torch.nn.Module):
         for conv in self.convs_feature_3:
             x3 = conv(x3)
         # upsample the deep and middle layers
-        x2 = self.upsample2(x2)
-        x3 = self.upsample3(x3)
-        # concatenate the features
-        x = torch.cat((x1, x2, x3), dim=1) # (batch_size, 3*n_hidden_channels, 80, 80)
-        # resize the x to (batch_size, 3*n_hidden_channels, input_image_shape[0], input_image_shape[1])
-        x = torch.nn.functional.interpolate(x,
-                                            size=(self.input_image_shape[0], self.input_image_shape[1]),
-                                            mode='bilinear', align_corners=False)
-        # concatenate x0 and x
-        x = torch.cat((x0, x), dim=1)
+        x2 = self.upsample_feature2(x2)
+        x3 = self.upsample_feature3(x3)
+        # add the features
+        x = x1 + x2 + x3
+        # gradually upsame the feature to the input image size
+        x = self.upsample_merged_feature_1(x)
+        x_skip_1 = x
+        for conv in self.convs_merged_feature_1:
+            x = conv(x)
+        x = x + x_skip_1
+        x = self.upsample_merged_feature_2(x)
+        x_skip_2 = x
+        for conv in self.convs_merged_feature_2:
+            x = conv(x)
+        x = x + x_skip_2
+        x = self.upsample_merged_feature_3(x)
+        x_skip_3 = x
+        for conv in self.convs_merged_feature_3:
+            x = conv(x)
+        x = x + x_skip_3
+        # add x0 and x
+        x = x + x0
         for conv in self.convs_output:
             x = conv(x)
         # (batch_size, 1, input_image_shape[0], input_image_shape[1]) ->

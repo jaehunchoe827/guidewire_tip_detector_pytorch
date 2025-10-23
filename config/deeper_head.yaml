@@ -3,10 +3,10 @@ from_logits: true
 
 training:
   # note that the epoch starts from 1
-  epochs: 30
-  batch_size: 12
+  epochs: 15
+  batch_size: 8
   accumulate: 2 # accumulate over 4 batches
-  unfreeze_backbone_epochs: 5 # unfreeze backbone at the start of this epoch
+  unfreeze_backbone_epochs: 3 # unfreeze backbone at the start of this epoch
   loss_main: ["bce", "mse"]
   loss_weights:
     bce: 0.9
@@ -15,8 +15,16 @@ training:
     name: "AdamW"
     weight_decay: 0.00001
     args:
+  # optimizer:
+  #   name: "SGD"
+  #   weight_decay: 0.00001
+  #   args:
+  #     momentum: 0.9
+  #     nesterov: True
+  #     min_lr: 0.00001
+  max_grad_norm: 100.0 # relaxed from 1.0
   lr_scheduler:
-    # possible options: CosineLR, LinearLR, ExponentialLR
+    # possible options: CosineLR, LinearLR, ExponentialLR, StepLR
     name: "CosineLR"
     args:
       warmup_epochs: 1 # warmup epochs (warm up during these epochs)
@@ -27,11 +35,14 @@ network:
   input_image_shape: [640, 640] # height, width
   head:
     num_hidden_channels: 64
-    num_convs_for_input_feature : 4
+    num_convs_for_input_feature : 3
     num_convs_for_shallow_feature : 3
     num_convs_for_middle_feature : 3
     num_convs_for_deep_feature : 3
-    num_convs_for_merged_feature : 3
+    num_convs_for_merged_feature_1 : 1
+    num_convs_for_merged_feature_2 : 1
+    num_convs_for_merged_feature_3 : 1
+    num_convs_for_output : 3
 
 # Data augmentation for training.
 # They are executed in the order below.
@@ -52,11 +63,11 @@ dataset:
       probability: 0.5
       args:
     random_scale_intensity:
-      probability: 0.3
+      probability: 0.5
       args:
         scale_factor_range: [0.8, 1.2]
     random_saturation:
-      probability: 0.3
+      probability: 0.5
       args:
         saturation_factor_range: [0.8, 1.2]
     random_hue_shift:
@@ -64,7 +75,7 @@ dataset:
       args:
         hue_shift_range: [-0.05, 0.05]
     random_gaussian_sharpness:
-      probability: 0.3
+      probability: 0.4
       args:
         kernel_size: 5
         sigma_range: [-1.5, 1.5]
@@ -74,7 +85,7 @@ dataset:
         alpha_range: [0.0, 0.004]
         sigma: 1.0
     random_perspective:
-      probability: 0.3
+      probability: 0.5
       args:
         perspective_factor_range: [-0.05, 0.05]
     random_resize:
@@ -88,15 +99,15 @@ dataset:
         shear_x_range: [-0.05, 0.05]
         shear_y_range: [-0.05, 0.05]
     random_rotation:
-      probability: 0.4
+      probability: 0.7
       args:
         angle_range: [-3.14159, 3.14159] # radians
     random_crop:
-      probability: 0.5
+      probability: 0.7
       args:
         safe_reigon: 0.1
     random_cutout:
-      probability: 0.5
+      probability: 0.7
       args:
         cutout_size_range: [0.05, 0.2]
         max_num_cutouts: 2

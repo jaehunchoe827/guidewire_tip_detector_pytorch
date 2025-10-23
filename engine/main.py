@@ -1,4 +1,3 @@
-
 import os
 import sys
 import csv
@@ -20,7 +19,6 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(script_dir)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
-    
 
 from nets import nn
 from utils import util
@@ -48,6 +46,7 @@ def train(config):
     batch_size = config['training']['batch_size']
     accumulate = config['training']['accumulate']
     unfreeze_backbone_epochs = config['training']['unfreeze_backbone_epochs']
+    max_grad_norm = config['training']['max_grad_norm']
     is_backbone_unfrozen = False
 
     # Optimizer
@@ -137,7 +136,7 @@ def train(config):
                 x = x.cuda(non_blocking=True)
                 y = y.cuda(non_blocking=True)
                 ## print shape of x and y
-                with torch.amp.autocast(device_type='cuda'):
+                with torch.amp.autocast(device_type='cuda'): # use float16 by default
                     prediction = model(x)
                     losses = criterion(prediction, y)
                 
@@ -149,10 +148,14 @@ def train(config):
                 
                 # Scale loss for gradient accumulation (divide by accumulate)
                 loss_total = loss_total / accumulate
+
                 amp_scale.scale(loss_total).backward()
 
                 # step on accumulation boundary
                 if (batch_index + 1) % accumulate == 0 or (batch_index + 1) == num_steps_per_epoch:
+                    # Unscale then clip gradients before stepping
+                    amp_scale.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
                     amp_scale.step(optimizer)
                     amp_scale.update()
                     optimizer.zero_grad(set_to_none=True)
@@ -175,10 +178,10 @@ def train(config):
                 
                 # Update progress bar with key metrics
                 p_bar.set_postfix(
-                    loss=f"{(loss_total.item() * accumulate):.6f}", 
-                    lr=f"{current_lr:.6f}",
-                    acc2=f"{losses['2%_win_acc'].item():.4f}",
-                    acc1=f"{losses['1%_win_acc'].item():.4f}"
+                    loss=f"{(loss_total.item() * accumulate):.5f}", 
+                    lr=f"{current_lr:.5f}",
+                    acc2=f"{losses['2%_win_acc'].item():.3f}",
+                    acc1=f"{losses['1%_win_acc'].item():.3f}"
                 )
 
                 # update global step
@@ -193,7 +196,7 @@ def train(config):
                     x_val = x_val.cuda(non_blocking=True)
                     y_val = y_val.cuda(non_blocking=True)
                     # for validation, we disable AMP to avoid precision issues
-                    with torch.amp.autocast(device_type='cuda', enabled=False):
+                    with torch.amp.autocast(device_type='cuda'):
                         pred_val = model(x_val)
                     val_losses = criterion(pred_val, y_val)
                     

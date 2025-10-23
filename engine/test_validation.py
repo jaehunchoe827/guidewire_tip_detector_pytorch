@@ -26,19 +26,17 @@ from nets import nn
 from utils import util
 from utils import training_utils
 
-# warnings.filterwarnings("ignore")
-data_dir = '/home/jaehun/YOLOv11-pt-master/datasets/coco'
 
-
-def validation(config):
+def validation(config, weights_epoch):
     # create the model
     name_backbone = config['backbone']
     backbone_weights_path = os.path.join(project_root, 'weights', f'{name_backbone}.pt')
     model = nn.YOLOwithCustomHead(name_backbone,
                                   backbone_weights_path,
                                   config['network']['input_image_shape'],
+                                  config['network']['head'],
                                   from_logits=config['from_logits'])
-    pretrained_weights_path = os.path.join(project_root, 'results', config['config_name'], 'best.pt')
+    pretrained_weights_path = os.path.join(project_root, 'results', config['config_name'], f'epoch_{weights_epoch:04d}.pt')
     util.load_weight(model, pretrained_weights_path)
     model.cuda()
     profile_model(model, config['network']['input_image_shape'])
@@ -91,14 +89,19 @@ def validation(config):
     val_losses_sum = {}
     num_val_batches = max(1, len(val_loader))
     with torch.no_grad():
-        for x_val, y_val in val_loader:
+        for i, (x_val, y_val) in enumerate(val_loader):
             x_val = x_val.cuda(non_blocking=True)
             y_val = y_val.cuda(non_blocking=True)
             # for validation, we disable AMP to avoid precision issues
             with torch.amp.autocast(device_type='cuda', enabled=False):
                 pred_val = model(x_val)
             val_losses = criterion(pred_val, y_val)
-            
+            # INSERT_YOUR_CODE
+            # Save or print raw values of y_val and pred_val for inspection
+            # For demonstration, this will print the numpy arrays of the first batch in validation
+            if i == 0:
+                print("Raw y_val (ground truth):", y_val.cpu().numpy())
+                print("Raw pred_val (prediction):", pred_val.cpu().numpy())
             # Accumulate validation losses
             for loss_name, loss_value in val_losses.items():
                 if loss_name not in val_losses_sum:
@@ -124,9 +127,8 @@ def validation(config):
 
 def profile_model(model, input_image_shape):
     model.eval()
-    # Add batch and color channel dimension: [H, W] -> [1, 3, H, W]
-    batch_input_shape = (1, 3) + tuple(input_image_shape)
-    print('input_shape: %s' % str(batch_input_shape))
+    # Add batch and color channel dimension: [H, W] -> [1, 1, H, W]
+    batch_input_shape = (1, 1) + tuple(input_image_shape)
     
     # Print total number of parameters
     total_params = sum(p.numel() for p in model.parameters())
@@ -150,6 +152,7 @@ def main():
     parser = ArgumentParser()
     # here, the config path is relative to the project root / config folder
     parser.add_argument('--config', default='default.yaml', type=str)
+    parser.add_argument('--weights_epoch', default=1, type=int)
 
     args = parser.parse_args()
 
@@ -167,7 +170,7 @@ def main():
     seed_value = config.get('seed', 0)
     util.setup_seed(seed_value)
 
-    validation(config)
+    validation(config, args.weights_epoch)
 
 if __name__ == "__main__":
     main()

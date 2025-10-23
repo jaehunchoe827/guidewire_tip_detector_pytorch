@@ -11,6 +11,11 @@ def generate_optimizer(model, optimizer_config):
         if optimizer_args is not None:
             return torch.optim.AdamW(params, **optimizer_args)
         return torch.optim.AdamW(params)
+    elif optimizer_name == 'sgd':
+        params = set_params(model, optimizer_config['weight_decay'])
+        if optimizer_args is not None:
+            return torch.optim.SGD(params, **optimizer_args)
+        return torch.optim.SGD(params)
     else:
         raise ValueError(f"Unsupported optimizer: {optimizer_name}")
 

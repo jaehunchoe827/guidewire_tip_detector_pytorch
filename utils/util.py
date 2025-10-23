@@ -68,16 +68,6 @@ def export_onnx(args):
     # https://github.com/ultralytics/ultralytics/blob/main/ultralytics/nn/autobackend.py
 
 
-# def load_weight(model, ckpt):
-#     dst = model.state_dict()
-#     src = torch.load(ckpt, weights_only=False)['model'].float().cpu()
-#     ckpt = {}
-#     for k, v in src.state_dict().items():
-#         if k in dst and v.shape == dst[k].shape:
-#             ckpt[k] = v
-#     model.load_state_dict(state_dict=ckpt, strict=False)
-#     return
-
 def load_weight(model, ckpt_path):
     """
     Load weights into model from a checkpoint file that may contain either:
@@ -105,6 +95,7 @@ def load_weight(model, ckpt_path):
     # Filter compatible keys
     filtered = {k: v for k, v in src_state.items() if k in dst_state and v.shape == dst_state[k].shape}
     model.load_state_dict(filtered, strict=False)
+    print(f'Loaded weights from {ckpt_path}')
     return
 
 def make_anchors(x, strides, offset=0.5):
