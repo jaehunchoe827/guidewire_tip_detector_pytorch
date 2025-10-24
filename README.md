@@ -2,11 +2,9 @@
 This repo is implemeted based on jahongir7174's [YOLOv11-pt](https://github.com/jahongir7174/YOLOv11-pt)
 
 # parameters
+0. consider using trainable upsamplers
 1. yolo model size
 2. head # units, # conv layers
-
-## TODO
-0. consider using trainable upsamplers
 
 ## Target
 1%_win_acc = 0.6191, and 2%_win_acc = 0.8231

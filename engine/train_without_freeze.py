@@ -125,10 +125,10 @@ def train(config):
         for epoch in range(1, epochs+1):
             optimizer.zero_grad()
 
-            if epoch >= unfreeze_backbone_epochs and not is_backbone_unfrozen:
-                model.unfreeze_backbone()
-                is_backbone_unfrozen = True
-                print(f"Backbone unfreezed at epoch {epoch}")
+            # if epoch >= unfreeze_backbone_epochs and not is_backbone_unfrozen:
+            #     model.unfreeze_backbone()
+            #     is_backbone_unfrozen = True
+            #     print(f"Backbone unfreezed at epoch {epoch}")
 
             p_bar = tqdm.tqdm(loader, total=num_steps_per_epoch,
                               desc=f"Epoch {epoch}/{epochs}", leave=False,

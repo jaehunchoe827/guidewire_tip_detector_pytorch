@@ -3,46 +3,39 @@ from_logits: true
 
 training:
   # note that the epoch starts from 1
-  epochs: 15
+  epochs: 5
   batch_size: 8
-  accumulate: 2 # accumulate over 4 batches
-  unfreeze_backbone_epochs: 3 # unfreeze backbone at the start of this epoch
+  accumulate: 3 # accumulate over 4 batches
+  unfreeze_backbone_epochs: 300 # unfreeze backbone at the start of this epoch
   loss_main: ["bce", "mse"]
   loss_weights:
     bce: 0.9
     mse: 0.1
-  optimizer:
-    name: "AdamW"
-    weight_decay: 0.00001
-    args:
   # optimizer:
-  #   name: "SGD"
+  #   name: "AdamW"
   #   weight_decay: 0.00001
   #   args:
-  #     momentum: 0.9
-  #     nesterov: True
-  #     min_lr: 0.00001
-  max_grad_norm: 100.0 # relaxed from 1.0
+  optimizer:
+    name: "SGD"
+    weight_decay: 0.0001
+    args:
+      momentum: 0.9
+      nesterov: True
+  max_grad_norm: 10.0 # relaxed from 1.0
   lr_scheduler:
     # possible options: CosineLR, LinearLR, ExponentialLR, StepLR
     name: "CosineLR"
     args:
-      warmup_epochs: 1 # warmup epochs (warm up during these epochs)
+      warmup_epochs: 0.5 # warmup epochs (warm up during these epochs)
       min_lr: 0.00001  # initial learning rate
-      max_lr: 0.003  # maximum learning rate
+      max_lr: 0.001  # maximum learning rate
 
 network:
   input_image_shape: [640, 640] # height, width
   head:
+    version: "ver2"
     num_hidden_channels: 96
-    num_convs_for_input_feature : 2
-    num_convs_for_shallow_feature : 2
-    num_convs_for_middle_feature : 2
-    num_convs_for_deep_feature : 2
-    num_convs_for_merged_feature_1 : 2
-    num_convs_for_merged_feature_2 : 2
-    num_convs_for_merged_feature_3 : 2
-    num_convs_for_output : 4
+    use_se: True
 
 # Data augmentation for training.
 # They are executed in the order below.
