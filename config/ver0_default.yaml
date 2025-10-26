@@ -1,12 +1,15 @@
 backbone: "yolo_v11_s"
 from_logits: true
 
+# lower weight decay
+# change optimizer to AdamW
+
 training:
   # note that the epoch starts from 1
-  epochs: 5
+  epochs: 10
   batch_size: 8
-  accumulate: 3 # accumulate over 4 batches
-  unfreeze_backbone_epochs: 300 # unfreeze backbone at the start of this epoch
+  accumulate: 2 # accumulate over 4 batches
+  unfreeze_backbone_epochs: 2 # unfreeze backbone at the start of this epoch
   loss_main: ["bce", "mse"]
   loss_weights:
     bce: 0.9
@@ -26,18 +29,20 @@ training:
     # possible options: CosineLR, LinearLR, ExponentialLR, StepLR
     name: "CosineLR"
     args:
-      warmup_epochs: 0.5 # warmup epochs (warm up during these epochs)
+      warmup_epochs: 1.0 # warmup epochs (warm up during these epochs)
       min_lr: 0.00001  # initial learning rate
-      max_lr: 0.001  # maximum learning rate
+      max_lr: 0.003  # maximum learning rate
 
 network:
   input_image_shape: [640, 640] # height, width
   head:
-    version: "ver1"
-    num_hidden_channels: 64
-    num_convs_for_input_feature : 3
-    num_convs_for_output : 3
-    use_se: False
+    version: "ver0"
+    num_hidden_channels: 96
+    num_convs_for_input_feature : 2
+    num_convs_for_shallow_feature : 2
+    num_convs_for_middle_feature : 2
+    num_convs_for_deep_feature : 2
+    num_convs_for_merged_feature : 2
 
 # Data augmentation for training.
 # They are executed in the order below.

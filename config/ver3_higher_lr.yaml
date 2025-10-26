@@ -28,17 +28,16 @@ training:
     args:
       warmup_epochs: 0.5 # warmup epochs (warm up during these epochs)
       min_lr: 0.00001  # initial learning rate
-      max_lr: 0.001  # maximum learning rate
+      max_lr: 0.003  # maximum learning rate
 
 network:
   input_image_shape: [640, 640] # height, width
   head:
-    version: "ver1"
-    num_hidden_channels: 64
-    num_convs_for_input_feature : 3
-    num_convs_for_output : 3
-    use_se: False
-
+    version: "ver3"
+    num_hidden_channels: 96
+    use_se: True
+    edge_assist: True
+    
 # Data augmentation for training.
 # They are executed in the order below.
 dataset:
