@@ -32,7 +32,8 @@ Epoch 9/30 - val_loss_total: 0.000641, val_acc5: 0.81411, val_acc1: 0.71264
 ```
 conda create -n gwtd python=3.10
 conda activate gwtd
-conda install pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia
+conda install nvidia/label/cuda-12.8.1::cuda-toolkit
+conda install nvidia/label/cudnn-9.7.1::cudnn
 pip install torch==2.7.1 torchvision==0.22.1 torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/cu128
 pip install opencv-python PyYAML tqdm thop seaborn pandas
 ```
@@ -46,8 +47,9 @@ export CUBLAS_WORKSPACE_CONFIG=:16:8
     ```
     # torch.use_deterministic_algorithms(True)
     ```
-* Configure your dataset path in `main.py` for training
-* Run `bash main.sh $ --train` for training, `$` is number of GPUs
+```
+python3 -m engine.main --train --config ver0_default.yaml
+```
 
 ### Test
 

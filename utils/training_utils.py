@@ -49,6 +49,8 @@ def generate_lr_scheduler(epochs, num_steps_per_epoch, lr_scheduler_config):
         return ExponentialLR(epochs, num_steps_per_epoch, **lr_scheduler_args)
     elif lr_scheduler_name == 'steplr':
         return StepLR(epochs, num_steps_per_epoch, **lr_scheduler_args)
+    elif lr_scheduler_name == 'constantlr':
+        return ConstantLR(epochs, num_steps_per_epoch, **lr_scheduler_args)
     else:
         raise ValueError(f"Unsupported learning rate scheduler: {lr_scheduler_name}")
 
@@ -169,6 +171,31 @@ class StepLR:
             lr_segments.append(lr_segment)
         self.total_lr = np.concatenate((warmup_lr, np.concatenate(lr_segments)))
         print(f"total_steps: {total_steps}, total_lr.shape: {self.total_lr.shape}")
+        # unfreeze with warmup
+        if unfreeze_backbone_epochs is not None and warmup_steps > 0:
+            unfreeze_start_step = int((unfreeze_backbone_epochs - 1) * num_steps_per_epoch)
+            unfreeze_end_step = unfreeze_start_step + warmup_steps
+            total_steps = self.total_lr.shape[0]
+            # Clamp to valid range in case unfreeze is near/after training end
+            start = max(0, unfreeze_start_step)
+            end = min(total_steps, unfreeze_end_step)
+            if start < end:  # valid range
+                for step_idx in range(start, end):
+                    progress = (step_idx - unfreeze_start_step) / warmup_steps
+                    progress = max(0.0, progress)
+                    unfreeze_lr = progress * (max_lr - min_lr) + min_lr
+                    self.total_lr[step_idx] = min(self.total_lr[step_idx], unfreeze_lr)
+
+    def step(self, step, optimizer):
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = self.total_lr[step]
+
+class ConstantLR:
+    def __init__(self, epochs, num_steps_per_epoch, max_lr, min_lr,
+                 warmup_epochs, unfreeze_backbone_epochs=None):
+        warmup_steps = int(warmup_epochs * num_steps_per_epoch)
+        warmup_lr = np.linspace(min_lr, max_lr, int(warmup_steps), endpoint=False)
+        self.total_lr = np.concatenate((warmup_lr, np.ones(epochs * num_steps_per_epoch - warmup_steps) * max_lr))
         # unfreeze with warmup
         if unfreeze_backbone_epochs is not None and warmup_steps > 0:
             unfreeze_start_step = int((unfreeze_backbone_epochs - 1) * num_steps_per_epoch)
