@@ -10,7 +10,7 @@ This repo is implemeted based on jahongir7174's [YOLOv11-pt](https://github.com/
 1%_win_acc = 0.6191, and 2%_win_acc = 0.8231
 
 ## best so far : using bilinear upsampling
-(guidewire_detector) jaehun@jh22:~/workspace/guidewire_tip_detector_pytorch$ python3 -m engine.test_unfreeze --train --config wider_head.yaml
+(gwtd) jaehun@jh22:~/workspace/guidewire_tip_detector_pytorch$ python3 -m engine.test_unfreeze --train --config wider_head.yaml
 Start training...
 config loaded. number of keys: 6
 Loading weights from /home/jaehun/workspace/guidewire_tip_detector_pytorch/weights/yolo_v11_s.pt
@@ -30,15 +30,17 @@ Epoch 9/30 - val_loss_total: 0.000641, val_acc5: 0.81411, val_acc1: 0.71264
 
 ### Installation
 ```
-conda create -n guidewire_detector python=3.10.10
-conda activate guidewire_detector
+conda create -n gwtd python=3.10
+conda activate gwtd
 conda install pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia
+pip install torch==2.7.1 torchvision==0.22.1 torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/cu128
 pip install opencv-python PyYAML tqdm thop seaborn pandas
 ```
 After installation, you must add the following line to your ~/.bashrc
 ```
 export CUBLAS_WORKSPACE_CONFIG=:16:8
 ```
+
 ### Train
 * **For reproducibility**, you must uncomment the below line in utils.util.py
     ```

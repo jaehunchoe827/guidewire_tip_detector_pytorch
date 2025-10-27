@@ -1,11 +1,11 @@
-backbone: "yolo_v11_s"
+backbone: "yolo11s"
 from_logits: true
 
 training:
   # note that the epoch starts from 1
   epochs: 5
   batch_size: 8
-  accumulate: 3 # accumulate over 4 batches
+  accumulate: 2 # accumulate over 4 batches
   unfreeze_backbone_epochs: 300 # unfreeze backbone at the start of this epoch
   loss_main: ["bce", "mse"]
   loss_weights:
@@ -26,9 +26,9 @@ training:
     # possible options: CosineLR, LinearLR, ExponentialLR, StepLR
     name: "CosineLR"
     args:
-      warmup_epochs: 0.5 # warmup epochs (warm up during these epochs)
+      warmup_epochs: 1.0 # warmup epochs (warm up during these epochs)
       min_lr: 0.00001  # initial learning rate
-      max_lr: 0.001  # maximum learning rate
+      max_lr: 0.003  # maximum learning rate
 
 network:
   input_image_shape: [640, 640] # height, width

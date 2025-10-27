@@ -1,4 +1,4 @@
-backbone: "yolo_v11_s"
+backbone: "yolo11s"
 from_logits: true
 
 training:

@@ -706,19 +706,19 @@ class YOLOwithCustomHead(torch.nn.Module):
                  input_image_shape: tuple, config_head: dict, from_logits: bool = True):
         super().__init__()
         # load the yolo model
-        if name_of_yolo_model == 'yolo_v11_n':
+        if name_of_yolo_model == 'yolo11n':
             src_yolo_model = yolo_v11_n()
             feature_channels = [64, 128, 256]
-        elif name_of_yolo_model == 'yolo_v11_s':
+        elif name_of_yolo_model == 'yolo11s':
             src_yolo_model = yolo_v11_s()
             feature_channels = [128, 256, 512]
-        elif name_of_yolo_model == 'yolo_v11_m':
+        elif name_of_yolo_model == 'yolo11m':
             src_yolo_model = yolo_v11_m()
             feature_channels = [256, 512, 512]
-        elif name_of_yolo_model == 'yolo_v11_l':
+        elif name_of_yolo_model == 'yolo11l':
             src_yolo_model = yolo_v11_l()
             feature_channels = [256, 512, 512]
-        elif name_of_yolo_model == 'yolo_v11_x':
+        elif name_of_yolo_model == 'yolo11x':
             src_yolo_model = yolo_v11_x()
             feature_channels = [384, 768, 768]
         else:
