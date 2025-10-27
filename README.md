@@ -28,6 +28,10 @@ Epoch 8/30 - val_loss_total: 0.000696, val_acc5: 0.80020, val_acc1: 0.69256
 Epoch 9/30 - val_loss_total: 0.000641, val_acc5: 0.81411, val_acc1: 0.71264    
 
 
+### research note:
+1. CosineLR > ConstantLR (3e-3 to 1e-5)
+2. Adamw > SGD (weight decay = 1e-5)
+
 ### Installation
 ```
 conda create -n gwtd python=3.10

@@ -51,6 +51,8 @@ def generate_lr_scheduler(epochs, num_steps_per_epoch, lr_scheduler_config):
         return StepLR(epochs, num_steps_per_epoch, **lr_scheduler_args)
     elif lr_scheduler_name == 'constantlr':
         return ConstantLR(epochs, num_steps_per_epoch, **lr_scheduler_args)
+    elif lr_scheduler_name == 'doublecosinelr':
+        return DoubleCosineLR(epochs, num_steps_per_epoch, **lr_scheduler_args)
     else:
         raise ValueError(f"Unsupported learning rate scheduler: {lr_scheduler_name}")
 
@@ -94,8 +96,8 @@ class CosineLR:
         decay_steps = int(epochs * num_steps_per_epoch - warmup_steps)
         warmup_lr = np.linspace(min_lr, max_lr, int(warmup_steps), endpoint=False)
         decay_lr = []
-        for step in range(1, decay_steps + 1):
-            alpha = np.cos(np.pi * step / decay_steps)
+        for step in range(decay_steps):
+            alpha = np.cos(np.pi * step / (decay_steps-1))
             decay_lr.append(min_lr + 0.5 * (max_lr - min_lr) * (1 + alpha))
         self.total_lr = np.concatenate((warmup_lr, decay_lr))
         # unfreeze with warmup
@@ -125,8 +127,8 @@ class ExponentialLR:
         warmup_lr = np.linspace(min_lr, max_lr, int(warmup_steps), endpoint=False)
         decay_lr = []
         gamma_actual = np.log(max_lr / min_lr) / (decay_steps-1)
-        for step in range(1, decay_steps + 1):
-            lr = max_lr * np.exp(-gamma_actual * (step - 1))
+        for step in range(decay_steps):
+            lr = max_lr * np.exp(-gamma_actual * step)
             decay_lr.append(lr)
         self.total_lr = np.concatenate((warmup_lr, decay_lr))
         # unfreeze with warmup
@@ -210,6 +212,38 @@ class ConstantLR:
                     progress = max(0.0, progress)
                     unfreeze_lr = progress * (max_lr - min_lr) + min_lr
                     self.total_lr[step_idx] = min(self.total_lr[step_idx], unfreeze_lr)
+
+    def step(self, step, optimizer):
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = self.total_lr[step]
+
+
+class DoubleCosineLR:
+    def __init__(self, epochs, num_steps_per_epoch, max_lr, min_lr,
+                 warmup_epochs, unfreeze_backbone_epochs=None):
+        """
+        DoubleCosine LR scheduler. This is equivalent to two cosine LRs in series,
+        One from the start to unfreeze_backbone_epochs, and one from unfreeze_backbone_epochs to the end.
+        If unfreeze_backbone_epochs is None or total epoch is less than unfreeze_backbone_epochs,
+        then this is equivalent to a single cosine LR.
+        """
+        if unfreeze_backbone_epochs is None or unfreeze_backbone_epochs > epochs:
+            self.total_lr = CosineLR(epochs, num_steps_per_epoch, max_lr, min_lr, warmup_epochs).total_lr
+            return
+        warmup_steps = int(warmup_epochs * num_steps_per_epoch)
+        first_decay_steps = int((unfreeze_backbone_epochs - 1) * num_steps_per_epoch - warmup_steps)
+        second_decay_steps = int(epochs * num_steps_per_epoch - first_decay_steps - 2*warmup_steps)
+        first_warmup_lr = np.linspace(min_lr, max_lr, int(warmup_steps), endpoint=False)
+        second_warmup_lr = np.linspace(min_lr, max_lr, int(warmup_steps), endpoint=False)
+        first_decay_lr = []
+        second_decay_lr = []
+        for step in range(first_decay_steps):
+            alpha = np.cos(np.pi * step / (first_decay_steps)) # for the first decay, we do not include the min_lr
+            first_decay_lr.append(min_lr + 0.5 * (max_lr - min_lr) * (1 + alpha))
+        for step in range(second_decay_steps):
+            alpha = np.cos(np.pi * step / (second_decay_steps-1))
+            second_decay_lr.append(min_lr + 0.5 * (max_lr - min_lr) * (1 + alpha))
+        self.total_lr = np.concatenate((first_warmup_lr, first_decay_lr, second_warmup_lr, second_decay_lr))
 
     def step(self, step, optimizer):
         for param_group in optimizer.param_groups:

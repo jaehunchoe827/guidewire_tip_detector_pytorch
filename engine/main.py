@@ -131,8 +131,8 @@ def train(config):
                 print(f"Backbone unfreezed at epoch {epoch}")
 
             p_bar = tqdm.tqdm(loader, total=num_steps_per_epoch,
-                              desc=f"Epoch {epoch}/{epochs}", leave=False,
-                              ncols = 120)
+                              desc=f"Epoch {epoch}/{epochs}", leave=True,
+                              ncols = 110)
             for batch_index, (x, y) in enumerate(p_bar):
                 x = x.cuda(non_blocking=True)
                 y = y.cuda(non_blocking=True)
