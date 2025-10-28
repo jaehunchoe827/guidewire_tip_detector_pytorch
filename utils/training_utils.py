@@ -227,7 +227,7 @@ class DoubleCosineLR:
         If unfreeze_backbone_epochs is None or total epoch is less than unfreeze_backbone_epochs,
         then this is equivalent to a single cosine LR.
         """
-        if unfreeze_backbone_epochs is None or unfreeze_backbone_epochs > epochs:
+        if unfreeze_backbone_epochs is None or unfreeze_backbone_epochs > epochs or unfreeze_backbone_epochs <= 1:
             self.total_lr = CosineLR(epochs, num_steps_per_epoch, max_lr, min_lr, warmup_epochs).total_lr
             return
         warmup_steps = int(warmup_epochs * num_steps_per_epoch)

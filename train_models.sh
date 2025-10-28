@@ -1,20 +1,16 @@
 #!/bin/bash
-
-echo "Training step_lr.yaml"
-python3 -m engine.main --config step_lr.yaml --train
-echo "Process completed successfully!"
-
-echo "Training wider_head.yaml"
-python3 -m engine.main --config wider_head.yaml --train
-echo "Process completed successfully!"
-
-echo "Training deeper_head.yaml"
-python3 -m engine.main --config deeper_head.yaml --train
-echo "Process completed successfully!"
-
-echo "Training yolo_m.yaml"
-python3 -m engine.main --config yolo_m.yaml --train
-echo "Process completed successfully!"
-
+sleep 5
+echo "Training ver2_default.yaml"
+python3 -m engine.main --train --config ver2_default.yaml 
+sleep 5
+echo "Training ver2_unfreeze_at_0.yaml"
+python3 -m engine.main --train --config ver2_unfreeze_at_0.yaml 
+sleep 5
+echo "Training ver3_default.yaml"
+python3 -m engine.main --train --config ver3_default.yaml 
+sleep 5
+echo "Training ver3_unfreeze_at_0.yaml"
+python3 -m engine.main --train --config ver3_unfreeze_at_0.yaml 
+sleep 5
 
 
