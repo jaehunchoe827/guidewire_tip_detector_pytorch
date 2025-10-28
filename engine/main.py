@@ -51,6 +51,8 @@ def train(config):
 
     # Optimizer
     optimizer = training_utils.generate_optimizer(model, config['training']['optimizer'])
+    # param groups for gradient clipping
+    params_to_clip = [p for g in optimizer.param_groups for p in g['params']]
 
     # prepare dataset and loader
     dataset_path = os.path.join(project_root, 'datasets', 'guidewire')
@@ -128,8 +130,15 @@ def train(config):
             if epoch >= unfreeze_backbone_epochs and not is_backbone_unfrozen:
                 model.unfreeze_backbone()
                 is_backbone_unfrozen = True
+                # the trainable parameters has been changed.
+                # so we need to re-initialize the optimizer, gradient scaler, and param group
+                optimizer = training_utils.generate_optimizer(model, config['training']['optimizer'])
+                amp_scale = torch.amp.GradScaler()
+                params_to_clip = [p for g in optimizer.param_groups for p in g['params']]
+                optimizer.zero_grad()
                 print(f"Backbone unfreezed at epoch {epoch}")
-                model.train()
+                trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+                print(f'Trainable parameters: {trainable_params:,}')
 
             p_bar = tqdm.tqdm(loader, total=num_steps_per_epoch,
                               desc=f"Epoch {epoch}/{epochs}", leave=True,
@@ -150,20 +159,18 @@ def train(config):
                 
                 # Scale loss for gradient accumulation (divide by accumulate)
                 loss_total = loss_total / accumulate
-
                 amp_scale.scale(loss_total).backward()
 
                 # step on accumulation boundary
                 if (batch_index + 1) % accumulate == 0 or (batch_index + 1) == num_steps_per_epoch:
                     # Unscale then clip gradients before stepping
                     amp_scale.unscale_(optimizer)
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+                    torch.nn.utils.clip_grad_norm_(params_to_clip, max_grad_norm)
+                    # lr update per every accumulation boundary
+                    scheduler.step(global_step, optimizer)
                     amp_scale.step(optimizer)
                     amp_scale.update()
                     optimizer.zero_grad()
-                
-                # scheduler step every iteration
-                scheduler.step(global_step, optimizer)
 
                 # log
                 current_lr = optimizer.param_groups[0]['lr']

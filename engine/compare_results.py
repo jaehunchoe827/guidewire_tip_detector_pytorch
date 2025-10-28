@@ -154,6 +154,36 @@ def plot_metric_comparison(results_data: Dict[str, Tuple[pd.DataFrame, pd.DataFr
         print(f"{metric} comparison plot saved to: {output_file}")
 
 
+def plot_lr_comparison(results_data: Dict[str, Tuple[pd.DataFrame, pd.DataFrame]],
+                       output_dir: Path):
+    """Plot training learning rate comparison across experiments."""
+    plt.figure(figsize=(12, 8))
+
+    colors = plt.cm.tab10(np.linspace(0, 1, len(results_data)))
+
+    for i, (folder_name, (step_df, _)) in enumerate(results_data.items()):
+        color = colors[i]
+
+        if 'lr' not in step_df.columns:
+            continue
+
+        plt.plot(step_df['step'], step_df['lr'],
+                 label=f'{folder_name}', color=color, linewidth=2)
+
+    plt.xlabel('Step')
+    plt.ylabel('Learning Rate (log scale)')
+    plt.title('Learning Rate Comparison')
+    plt.yscale('log')
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+
+    output_file = output_dir / 'lr_comparison.png'
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"Learning rate comparison plot saved to: {output_file}")
+
+
 def main():
     """Main function to compare results across experiment folders."""
     parser = argparse.ArgumentParser(description='Compare training results across experiments')
@@ -207,6 +237,9 @@ def main():
     
     # Plot loss comparison
     plot_loss_comparison(results_data, output_dir)
+    
+    # Plot learning rate comparison
+    plot_lr_comparison(results_data, output_dir)
     
     # Plot metric comparisons
     plot_metric_comparison(results_data, output_dir)
