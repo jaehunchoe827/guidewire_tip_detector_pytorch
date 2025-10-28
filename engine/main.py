@@ -129,6 +129,7 @@ def train(config):
                 model.unfreeze_backbone()
                 is_backbone_unfrozen = True
                 print(f"Backbone unfreezed at epoch {epoch}")
+                model.train()
 
             p_bar = tqdm.tqdm(loader, total=num_steps_per_epoch,
                               desc=f"Epoch {epoch}/{epochs}", leave=True,
