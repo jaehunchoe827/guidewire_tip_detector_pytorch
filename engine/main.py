@@ -91,7 +91,7 @@ def train(config):
     config['training']['lr_scheduler']['args']['unfreeze_backbone_epochs'] = unfreeze_backbone_epochs
     scheduler = training_utils.generate_lr_scheduler(epochs, num_steps_per_epoch, config['training']['lr_scheduler'])
 
-    best_score = float('inf')
+    best_score = -float('inf') # set best score to minus infinity
     amp_scale = torch.amp.GradScaler()
     results_dir = os.path.join(project_root, 'results', config['config_name'])
     os.makedirs(results_dir, exist_ok=True)
@@ -244,8 +244,9 @@ def train(config):
             val_writer.writerow(val_csv_row)
 
             # Save best checkpoint based on total validation loss
-            if val_loss_total < best_score:
-                best_score = val_loss_total
+            one_percent_win_acc = val_losses_avg.get('1%_win_acc', 0)
+            if one_percent_win_acc > best_score:
+                best_score = one_percent_win_acc
                 ckpt = {
                     'model': model.state_dict(),
                     'epoch': epoch,
@@ -253,6 +254,7 @@ def train(config):
                     'config': config,
                 }
                 torch.save(ckpt, os.path.join(results_dir, 'best.pt'))
+                print(f"  Best 1% win accuracy: {best_score:.5f}")
 
             model.train()
     return
