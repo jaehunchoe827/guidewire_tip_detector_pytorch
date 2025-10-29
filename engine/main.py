@@ -124,6 +124,8 @@ def train(config):
         val_headers_written = False
         global_step = 0
         model.train()
+        # initial learning rate step
+        scheduler.step(global_step, optimizer)
         for epoch in range(1, epochs+1):
             optimizer.zero_grad()
 

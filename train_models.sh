@@ -9,8 +9,4 @@ sleep 5
 echo "Training ver3_default.yaml"
 python3 -m engine.main --train --config ver3_default.yaml 
 sleep 5
-echo "Training ver3_unfreeze_at_0.yaml"
-python3 -m engine.main --train --config ver3_unfreeze_at_0.yaml 
-sleep 5
-
-
+echo "All models trained successfully!"
