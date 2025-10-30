@@ -1,4 +1,4 @@
-backbone: "yolo11s"
+backbone: "yolo11m"
 from_logits: true
 
 # lower weight decay
@@ -8,8 +8,8 @@ training:
   # note that the epoch starts from 1
   epochs: 20
   batch_size: 8
-  accumulate: 2 # accumulate over 4 batches
-  unfreeze_backbone_epochs: 1 # unfreeze backbone at the start of this epoch
+  accumulate: 3 # accumulate over 4 batches
+  unfreeze_backbone_epochs: 2 # unfreeze backbone at the start of this epoch
   loss_main: ["bce", "mse"]
   loss_weights:
     bce: 0.9
@@ -26,13 +26,14 @@ training:
       warmup_epochs: 0.5 # warmup epochs (warm up during these epochs)
       min_lr: 0.000003  # initial learning rate
       max_lr: 0.003  # maximum learning rate
-
+      
 network:
   input_image_shape: [640, 640] # height, width
   head:
-    version: "ver2"
+    version: "ver3"
     num_hidden_channels: 96
-    use_se: False
+    use_se: True
+    edge_assist: True
 
 # Data augmentation for training.
 # They are executed in the order below.

@@ -193,6 +193,8 @@ def main():
                        help='Path to output directory for plots')
     parser.add_argument('--exclude_folders', nargs='*', default=['summary', 'dataset_test'],
                        help='Folders to exclude from comparison')
+    parser.add_argument('--target', nargs='+', default=None,
+                       help='Specific experiment folder names (within results_dir) to compare')
     
     args = parser.parse_args()
     
@@ -205,9 +207,17 @@ def main():
     
     # Find all experiment folders
     experiment_folders = []
-    for item in results_dir.iterdir():
-        if item.is_dir() and item.name not in args.exclude_folders:
-            experiment_folders.append(item)
+    if args.target:
+        for name in args.target:
+            path = results_dir / name
+            if path.is_dir():
+                experiment_folders.append(path)
+            else:
+                print(f"Warning: target folder not found: {path}")
+    else:
+        for item in results_dir.iterdir():
+            if item.is_dir() and item.name not in args.exclude_folders:
+                experiment_folders.append(item)
     
     if not experiment_folders:
         print("No experiment folders found!")

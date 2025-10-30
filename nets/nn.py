@@ -391,6 +391,7 @@ class SE(torch.nn.Module):
         return x * w
 
 
+
 class GuidewireDetectionHeadVer4(torch.nn.Module):
     def __init__(self, input_image_shape: tuple, feature_channels: list, config_head: dict, from_logits: bool = True):
         super().__init__()
@@ -407,9 +408,7 @@ class GuidewireDetectionHeadVer4(torch.nn.Module):
             Conv(3, 32, torch.nn.SiLU(), k=3, s=2, p=1),
             Conv(32, 64, torch.nn.SiLU(), k=3, s=2, p=1),
             Conv(64, self.nhc, torch.nn.SiLU(), k=3, s=1, p=1),
-            DSConv(self.nhc, self.nhc),
         )
-        self.se_image = SE(self.nhc) if self.use_se else torch.nn.Identity()
         # lateral
         self.conv_l3 = torch.nn.Sequential(
             Conv(self.c3, self.nhc, torch.nn.SiLU(), k=1, p=0),
@@ -432,18 +431,12 @@ class GuidewireDetectionHeadVer4(torch.nn.Module):
             DSConv(self.nhc, self.nhc),
         )
         # decoder
-        self.dec320 = torch.nn.Sequential(
-            DSConv(self.nhc, self.nhc),
-            DSConv(self.nhc, self.nhc),
-        )
-        self.dec640 = torch.nn.Sequential(
-            DSConv(self.nhc, self.nhc),
-            DSConv(self.nhc, self.nhc),
-        )
+        self.dec320 = DSConv(self.nhc, self.nhc)
+        self.dec640 = DSConv(self.nhc, self.nhc)
         if self.edge_assist:
             self.sobel = SobelMag()
             self.edge_refine = torch.nn.Sequential(
-                DSConv(self.nhc+1, self.nhc),
+                Conv(self.nhc+1, self.nhc, torch.nn.SiLU(), k=3, p=1),
                 DSConv(self.nhc, self.nhc),
             )
         # conv for output
@@ -462,7 +455,7 @@ class GuidewireDetectionHeadVer4(torch.nn.Module):
         p4 = x[2]
         p5 = x[3]
         # image feature extraction
-        imf = self.se_image(self.conv_image(x_image)) # (batch_size, nhc, 160, 160)
+        imf = self.conv_image(x_image) # (batch_size, nhc, 160, 160)
         # lateral connetctions
         l3 = self.se3(self.conv_l3(p3)) # (batch_size, nhc, 80, 80)
         l4 = self.se4(self.conv_l4(p4)) # (batch_size, nhc, 40, 40)
