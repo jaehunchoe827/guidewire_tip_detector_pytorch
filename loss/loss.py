@@ -30,6 +30,9 @@ class GuidewireHeatMapLoss:
         loss['mse'] = self.mse_loss(outputs, targets,
                                  from_logits=self.from_logits,
                                  reduction=self.reduction)
+        loss['mae'] = self.mae_loss(outputs, targets,
+                                 from_logits=self.from_logits,
+                                 reduction=self.reduction)
         loss['10%_win_acc'] = self.loss_percentage_window_accuracy(outputs, targets,
                                  window_size=0.1,
                                  reduction=self.reduction)            
@@ -67,6 +70,15 @@ class GuidewireHeatMapLoss:
         loss = torch.nn.functional.mse_loss(outputs, targets, reduction=reduction)
         return loss
     
+    def mae_loss(self, outputs, targets, from_logits: bool = True, reduction: str = 'mean'):
+        """
+            Mean absolute error loss: |p - t|
+        """
+        if from_logits:
+            outputs = torch.sigmoid(outputs)
+        loss = torch.nn.functional.l1_loss(outputs, targets, reduction=reduction)
+        return loss
+
     def loss_percentage_window_accuracy(self, outputs, targets, window_size: float = 0.05, reduction: str = 'mean'):
         """
             Loss percentage window accuracy:
