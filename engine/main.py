@@ -254,11 +254,108 @@ def train(config):
                     'config': config,
                 }
                 torch.save(ckpt, os.path.join(results_dir, 'best.pt'))
-                print(f"  Best 1% win accuracy: {best_score:.5f}")
 
             model.train()
     return
 
+def test(config):
+    # create the model
+    name_backbone = config['backbone']
+    backbone_weights_path = os.path.join(project_root, 'weights', f'{name_backbone}.pt')
+    model = nn.YOLOwithCustomHead(name_backbone,
+                                  backbone_weights_path,
+                                  config['network']['input_image_shape'],
+                                  config['network']['head'],
+                                  from_logits=config['from_logits'])
+    model.cuda()
+    # load weights
+    weights_path = os.path.join(project_root, 'results', config['config_name'], 'best.pt')
+    util.load_weight(model, weights_path)
+    # prepare dataset and loader
+    dataset_path = os.path.join(project_root, 'datasets', 'guidewire')
+    data_preprocessor = GuidewireDataPreprocessor(dir_dataset=dataset_path,
+                                                  split_ratio=config['dataset']['split_ratio'])
+    test_dataset = GuidewireDataSet(data_preprocessor.get_data_sample_names('test'),
+                                     apply_augmentation=False, config=config)
+    print (f"number of test samples: {len(test_dataset)}")
+
+    # deterministic seeding for DataLoader workers and shuffling
+    def seed_worker(worker_id):
+        worker_seed = torch.initial_seed() % 2**32
+        random.seed(worker_seed)
+        np.random.seed(worker_seed)
+
+    base_seed = config.get('seed', 0)
+    g = torch.Generator()
+    g.manual_seed(base_seed)
+
+    test_loader = data.DataLoader(test_dataset, config['training']['batch_size'],
+                                 shuffle=False, num_workers=os.cpu_count() - 2, pin_memory=True,
+                                 collate_fn=GuidewireDataSet.collate_fn,
+                                 worker_init_fn=seed_worker, generator=g)
+
+
+    results_dir = os.path.join(project_root, 'results', config['config_name'])
+    os.makedirs(results_dir, exist_ok=True)
+
+    # save the config
+    with open(os.path.join(results_dir, 'config_test.yaml'), 'w') as f:
+        yaml.dump(config, f)
+
+    criterion = GuidewireHeatMapLoss(from_logits=config['from_logits'])
+    
+    # Train
+    with open(os.path.join(results_dir, 'test_loss.csv'), 'w') as test_log:        
+        # Define CSV headers for test losses (will be set after first test)
+        test_writer = csv.writer(test_log)
+        test_headers_written = False
+
+        # Test at end of epoch
+        model.eval()
+        test_losses_sum = {}
+        num_test_batches = max(1, len(test_loader))
+        with torch.no_grad():
+            for x_test, y_test in test_loader:
+                x_test = x_test.cuda(non_blocking=True)
+                y_test = y_test.cuda(non_blocking=True)
+                # for test, we disable AMP to avoid precision issues
+                with torch.amp.autocast(device_type='cuda'):
+                    pred_test = model(x_test)
+                test_losses = criterion(pred_test, y_test)
+                
+                # Accumulate test losses
+                for loss_name, loss_value in test_losses.items():
+                    if loss_name not in test_losses_sum:
+                        test_losses_sum[loss_name] = 0.0
+                    test_losses_sum[loss_name] += float(loss_value.item())
+        
+        # Calculate average test losses
+        test_losses_avg = {loss_name: loss_sum / num_test_batches 
+                            for loss_name, loss_sum in test_losses_sum.items()}
+        
+        # Calculate weighted total test loss
+        test_loss_total = 0.0
+        for loss_name in config['training']['loss_main']:
+            if loss_name in test_losses_avg and loss_name in config['training']['loss_weights']:
+                test_loss_total += config['training']['loss_weights'][loss_name] * test_losses_avg[loss_name]
+    
+        # Log test losses to CSV
+        if not test_headers_written:
+            # Write headers dynamically based on available losses
+            test_csv_headers = ['epoch', 'test_loss_total'] + list(test_losses_avg.keys())
+            test_writer.writerow(test_csv_headers)
+            test_headers_written = True
+
+        test_csv_row = [test_loss_total]
+        for loss_name, loss_value in test_losses_avg.items():
+            test_csv_row.append(loss_value)
+        test_writer.writerow(test_csv_row)
+
+        print(f"Test loss: {test_loss_total:.6f}")
+        for loss_name, loss_value in test_losses_avg.items():
+            print(f"{loss_name}: {loss_value:.6f}")
+
+    return
 
 def profile_model(model, input_image_shape):
     model.eval()
@@ -308,6 +405,9 @@ def main():
 
     if args.train:
         train(config)
+
+    if args.test:
+        test(config)
 
 if __name__ == "__main__":
     main()

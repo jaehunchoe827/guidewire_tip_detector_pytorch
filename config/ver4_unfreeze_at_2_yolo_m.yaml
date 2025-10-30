@@ -1,4 +1,4 @@
-backbone: "yolo11s"
+backbone: "yolo11m"
 from_logits: true
 
 # lower weight decay
@@ -9,7 +9,7 @@ training:
   epochs: 20
   batch_size: 8
   accumulate: 2 # accumulate over 4 batches
-  unfreeze_backbone_epochs: 8 # unfreeze backbone at the start of this epoch
+  unfreeze_backbone_epochs: 2 # unfreeze backbone at the start of this epoch
   loss_main: ["bce", "mse"]
   loss_weights:
     bce: 0.9
@@ -30,7 +30,7 @@ training:
 network:
   input_image_shape: [640, 640] # height, width
   head:
-    version: "ver3"
+    version: "ver4"
     num_hidden_channels: 96
     use_se: True
     edge_assist: True

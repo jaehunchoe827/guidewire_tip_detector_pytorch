@@ -94,9 +94,14 @@ dataset:
       args:
         angle_range: [-3.14159, 3.14159] # radians
     random_crop:
-      probability: 0.7
+      probability: 0.4
       args:
         safe_reigon: 0.1
+    random_mosaic:
+      probability: 0.7
+      args:
+        mosaic_size_range: [0.05, 0.2]
+        max_num_mosaics: 2
     random_cutout:
       probability: 0.7
       args:

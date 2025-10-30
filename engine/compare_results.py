@@ -191,7 +191,7 @@ def main():
                        help='Path to results directory')
     parser.add_argument('--output_dir', type=str, default='results/summary',
                        help='Path to output directory for plots')
-    parser.add_argument('--exclude_folders', nargs='*', default=['summary'],
+    parser.add_argument('--exclude_folders', nargs='*', default=['summary', 'dataset_test'],
                        help='Folders to exclude from comparison')
     
     args = parser.parse_args()

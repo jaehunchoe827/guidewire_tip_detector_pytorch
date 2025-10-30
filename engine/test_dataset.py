@@ -21,6 +21,8 @@ from utils import util
 def visualize_sample(dataset: GuidewireDataSet, index: int, output_image_name: str):
     image, label = dataset.__getitem__(index, get_heatmap=False)
     heatmap = dataset.convert_pixel_coord_to_heatmap(label)
+    # add color channel to heatmap
+    heatmap = np.expand_dims(heatmap, axis=2)
     height, width = image.shape[:2]
     plt.figure(figsize=(10, 10), dpi=300)
     # plot original image and marked image side by side, and save the figure
@@ -46,12 +48,14 @@ def test_augmentation(sample, output_folder: str):
     image, label = sample
     images = []
     labels = []
+    aug_names = []
     # 1 brightness
     image_augmented, label_augmented = aug_functions.augment_brightness(
         image, label, 0.2
         )
     images.append(image_augmented)
     labels.append(label_augmented)
+    aug_names.append("brightness")
     print(f"Applied augmentation: brightness")
     print(f"image_augmented shape: {image_augmented.shape}, label_augmented: {label_augmented}")
     # 2 horizontal flip
@@ -60,6 +64,7 @@ def test_augmentation(sample, output_folder: str):
     )
     images.append(image_augmented)
     labels.append(label_augmented)
+    aug_names.append("horizontal flip")
     print(f"Applied augmentation: horizontal flip")
     print(f"image_augmented shape: {image_augmented.shape}, label_augmented: {label_augmented}")
     # 3 vertical flip
@@ -68,6 +73,7 @@ def test_augmentation(sample, output_folder: str):
     )
     images.append(image_augmented)
     labels.append(label_augmented)
+    aug_names.append("vertical flip")
     print(f"Applied augmentation: vertical flip")
     print(f"image_augmented shape: {image_augmented.shape}, label_augmented: {label_augmented}")
     # 4 gaussian noise
@@ -76,6 +82,7 @@ def test_augmentation(sample, output_folder: str):
     )
     images.append(image_augmented)
     labels.append(label_augmented)
+    aug_names.append("gaussian noise")
     print(f"Applied augmentation: gaussian noise")
     print(f"image_augmented shape: {image_augmented.shape}, label_augmented: {label_augmented}")
     # resize
@@ -84,6 +91,7 @@ def test_augmentation(sample, output_folder: str):
     )
     images.append(image_augmented)
     labels.append(label_augmented)
+    aug_names.append("resize")
     print(f"Applied augmentation: resize")
     print(f"image_augmented shape: {image_augmented.shape}, label_augmented: {label_augmented}")
     # shear
@@ -92,6 +100,7 @@ def test_augmentation(sample, output_folder: str):
     )
     images.append(image_augmented)
     labels.append(label_augmented)
+    aug_names.append("shear")
     print(f"Applied augmentation: shear")
     print(f"image_augmented shape: {image_augmented.shape}, label_augmented: {label_augmented}")
     # rotation
@@ -100,6 +109,7 @@ def test_augmentation(sample, output_folder: str):
     )
     images.append(image_augmented)
     labels.append(label_augmented)
+    aug_names.append("rotation")
     print(f"Applied augmentation: rotation")
     print(f"image_augmented shape: {image_augmented.shape}, label_augmented: {label_augmented}")
     # scale intensity
@@ -108,6 +118,7 @@ def test_augmentation(sample, output_folder: str):
     )
     images.append(image_augmented)
     labels.append(label_augmented)
+    aug_names.append("scale intensity")
     print(f"Applied augmentation: scale intensity")
     print(f"image_augmented shape: {image_augmented.shape}, label_augmented: {label_augmented}")
     # saturation
@@ -116,6 +127,7 @@ def test_augmentation(sample, output_folder: str):
     )
     images.append(image_augmented)
     labels.append(label_augmented)
+    aug_names.append("saturation")
     print(f"Applied augmentation: saturation")
     print(f"image_augmented shape: {image_augmented.shape}, label_augmented: {label_augmented}")
     # hue shift
@@ -124,6 +136,7 @@ def test_augmentation(sample, output_folder: str):
     )
     images.append(image_augmented)
     labels.append(label_augmented)
+    aug_names.append("hue shift")
     print(f"Applied augmentation: hue shift")
     print(f"image_augmented shape: {image_augmented.shape}, label_augmented: {label_augmented}")
     # gaussian sharpness
@@ -132,6 +145,7 @@ def test_augmentation(sample, output_folder: str):
     )
     images.append(image_augmented)
     labels.append(label_augmented)
+    aug_names.append("gaussian sharpness")
     print(f"Applied augmentation: gaussian sharpness")
     print(f"image_augmented shape: {image_augmented.shape}, label_augmented: {label_augmented}")
     # elastic deformation
@@ -140,6 +154,7 @@ def test_augmentation(sample, output_folder: str):
     )
     images.append(image_augmented)
     labels.append(label_augmented)
+    aug_names.append("elastic deformation")
     print(f"Applied augmentation: elastic deformation")
     print(f"image_augmented shape: {image_augmented.shape}, label_augmented: {label_augmented}")
     # cutout
@@ -148,6 +163,7 @@ def test_augmentation(sample, output_folder: str):
     )
     images.append(image_augmented)
     labels.append(label_augmented)
+    aug_names.append("cutout")
     print(f"Applied augmentation: cutout")
     print(f"image_augmented shape: {image_augmented.shape}, label_augmented: {label_augmented}")
     # perspective
@@ -156,6 +172,7 @@ def test_augmentation(sample, output_folder: str):
     )
     images.append(image_augmented)
     labels.append(label_augmented)
+    aug_names.append("perspective")
     print(f"Applied augmentation: perspective")
     print(f"image_augmented shape: {image_augmented.shape}, label_augmented: {label_augmented}")
     # crop
@@ -164,7 +181,17 @@ def test_augmentation(sample, output_folder: str):
     )
     images.append(image_augmented)
     labels.append(label_augmented)
+    aug_names.append("crop")
     print(f"Applied augmentation: crop")
+    print(f"image_augmented shape: {image_augmented.shape}, label_augmented: {label_augmented}")
+    # mosaic
+    image_augmented, label_augmented = aug_functions.augment_mosaic(
+        image, label, 0.2
+    )
+    images.append(image_augmented)
+    labels.append(label_augmented)
+    aug_names.append("mosaic")
+    print(f"Applied augmentation: mosaic")
     print(f"image_augmented shape: {image_augmented.shape}, label_augmented: {label_augmented}")
     # create a subplot that has two colums: one column for the original image,
     # and one column for the augmented image
@@ -189,13 +216,13 @@ def test_augmentation(sample, output_folder: str):
         plt.subplot(1, 2, 2)
         plt.imshow(image_augmented, cmap = 'gray')
         plt.axis('off')
-        plt.savefig(os.path.join(output_folder, 'augmentation_test_'+str(i)+'.jpg'), bbox_inches='tight', pad_inches=0)
+        plt.savefig(os.path.join(output_folder, 'augmentation_test_'+aug_names[i]+'.jpg'), bbox_inches='tight', pad_inches=0)
     plt.close()
 
 
 if __name__ == '__main__':
     # load config
-    config_path = os.path.join(project_root, 'config', 'default.yaml')
+    config_path = os.path.join(project_root, 'config', 'ver3_default.yaml')
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
     dataset_path = os.path.join(project_root, 'datasets', 'guidewire')

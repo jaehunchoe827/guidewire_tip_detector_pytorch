@@ -391,6 +391,109 @@ class SE(torch.nn.Module):
         return x * w
 
 
+class GuidewireDetectionHeadVer4(torch.nn.Module):
+    def __init__(self, input_image_shape: tuple, feature_channels: list, config_head: dict, from_logits: bool = True):
+        super().__init__()
+        self.nhc = config_head['num_hidden_channels'] # hidden channels
+        self.input_image_shape = input_image_shape
+        self.feature_channels = feature_channels
+        self.c3 = feature_channels[0]
+        self.c4 = feature_channels[1]
+        self.c5 = feature_channels[2]
+        self.use_se = config_head['use_se']
+        self.edge_assist = config_head['edge_assist']
+        # image feature extraction
+        self.conv_image = torch.nn.Sequential(
+            Conv(3, 32, torch.nn.SiLU(), k=3, s=2, p=1),
+            Conv(32, 64, torch.nn.SiLU(), k=3, s=2, p=1),
+            Conv(64, self.nhc, torch.nn.SiLU(), k=3, s=1, p=1),
+            DSConv(self.nhc, self.nhc),
+        )
+        self.se_image = SE(self.nhc) if self.use_se else torch.nn.Identity()
+        # lateral
+        self.conv_l3 = torch.nn.Sequential(
+            Conv(self.c3, self.nhc, torch.nn.SiLU(), k=1, p=0),
+            DSConv(self.nhc, self.nhc),
+        )
+        self.conv_l4 = torch.nn.Sequential(
+            Conv(self.c4, self.nhc, torch.nn.SiLU(), k=1, p=0),
+            DSConv(self.nhc, self.nhc),
+        )
+        self.conv_l5 = torch.nn.Sequential(
+            Conv(self.c5, self.nhc, torch.nn.SiLU(), k=1, p=0),
+            DSConv(self.nhc, self.nhc),
+        )
+        self.se3 = SE(self.nhc) if self.use_se else torch.nn.Identity()
+        self.se4 = SE(self.nhc) if self.use_se else torch.nn.Identity()
+        self.se5 = SE(self.nhc) if self.use_se else torch.nn.Identity()
+        # fuse features
+        self.fuse160 = torch.nn.Sequential(
+            Conv(4*self.nhc, self.nhc, torch.nn.SiLU(), k=1, p=0),
+            DSConv(self.nhc, self.nhc),
+        )
+        # decoder
+        self.dec320 = torch.nn.Sequential(
+            DSConv(self.nhc, self.nhc),
+            DSConv(self.nhc, self.nhc),
+        )
+        self.dec640 = torch.nn.Sequential(
+            DSConv(self.nhc, self.nhc),
+            DSConv(self.nhc, self.nhc),
+        )
+        if self.edge_assist:
+            self.sobel = SobelMag()
+            self.edge_refine = torch.nn.Sequential(
+                DSConv(self.nhc+1, self.nhc),
+                DSConv(self.nhc, self.nhc),
+            )
+        # conv for output
+        self.conv_output = DSConv(self.nhc, 64)
+        # final prediction
+        if from_logits:
+            self.pred = Conv(64, 1, torch.nn.Identity(), k=1, p=0, use_norm=False)
+        else:
+            self.pred = Conv(64, 1, torch.nn.Sigmoid(), k=1, p=0, use_norm=False)
+
+    def forward(self, x):
+        # here the input is list of 4 tensors
+        # [input image, feature from shallow layer, feature from middle layer, feature from deep layer]
+        x_image = x[0] # input image. shape: (batch_size, 3, 640, 640)
+        p3 = x[1]
+        p4 = x[2]
+        p5 = x[3]
+        # image feature extraction
+        imf = self.se_image(self.conv_image(x_image)) # (batch_size, nhc, 160, 160)
+        # lateral connetctions
+        l3 = self.se3(self.conv_l3(p3)) # (batch_size, nhc, 80, 80)
+        l4 = self.se4(self.conv_l4(p4)) # (batch_size, nhc, 40, 40)
+        l5 = self.se5(self.conv_l5(p5)) # (batch_size, nhc, 20, 20)
+        # upsample l3, l4, l5 to 160x160
+        l3 = self.up_sample(l3, scale_factor=2)
+        l4 = self.up_sample(l4, scale_factor=4)
+        l5 = self.up_sample(l5, scale_factor=8)
+        # concatenate i3, l3, l4, l5
+        features = [imf, l3, l4, l5]
+        features = torch.cat(features, dim=1)
+        # decode features
+        h160 = self.fuse160(features)
+        h320 = self.dec320(self.up_sample(h160))
+        h640 = self.dec640(self.up_sample(h320))
+        if self.edge_assist:
+            edge = self.sobel(x_image)
+            h640 = self.edge_refine(torch.cat([h640, edge], dim=1))
+        out = self.conv_output(h640)
+        out = self.pred(out)
+        # (b, 1, h, w) -> (b, h, w)
+        out = out.squeeze(1)
+        return out
+
+    def up_sample(self, x, scale_factor=2): # bilinear upsample
+        return torch.nn.functional.interpolate(x, scale_factor=scale_factor, mode='bilinear')
+
+    def down_sample(self, x): # max pooling downsample
+        return torch.nn.functional.max_pool2d(x, kernel_size=2, stride=2)
+
+
 class GuidewireDetectionHeadVer3(torch.nn.Module):
     def __init__(self, input_image_shape: tuple, feature_channels: list, config_head: dict, from_logits: bool = True):
         super().__init__()
@@ -748,6 +851,11 @@ class YOLOwithCustomHead(torch.nn.Module):
                                                    from_logits)
         elif config_head['version'] == 'ver3':
             self.head = GuidewireDetectionHeadVer3(input_image_shape,
+                                                   feature_channels,
+                                                   config_head,
+                                                   from_logits)
+        elif config_head['version'] == 'ver4':
+            self.head = GuidewireDetectionHeadVer4(input_image_shape,
                                                    feature_channels,
                                                    config_head,
                                                    from_logits)

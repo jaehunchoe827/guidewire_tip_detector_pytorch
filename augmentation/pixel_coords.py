@@ -356,7 +356,7 @@ def augment_random_elastic_deformation(image, coords, alpha_range, sigma = 1.0):
     return augment_elastic_deformation(image, coords, alpha, sigma)
 
 
-def augment_cutout(image, coords, cutout_size, max_num_cutouts=2, safe_reigon=0.1):
+def augment_cutout(image, coords, cutout_size, num_cutouts=2, safe_reigon=0.1):
     """
     Apply cutout (random erasing) augmentation
     cutout_size should be between [0.0, 1.0] (generally between 0.0 and 0.2)
@@ -366,7 +366,6 @@ def augment_cutout(image, coords, cutout_size, max_num_cutouts=2, safe_reigon=0.
     height, width = image.shape[:2]
     image_cutout = image.copy()
     cutout_size_in_pixels = int(cutout_size * min(height, width))
-    num_cutouts = np.random.randint(1, max_num_cutouts + 1)
     for _ in range(num_cutouts):
         # Random position for cutout
         cutout_h = min(cutout_size_in_pixels, height)
@@ -394,8 +393,9 @@ def augment_random_cutout(image, coords, cutout_size_range, max_num_cutouts=2, s
     """
     apply random cutout (between range) to the image
     """
+    num_cutouts = np.random.randint(1, max_num_cutouts + 1)
     cutout_size = np.random.uniform(cutout_size_range[0], cutout_size_range[1])
-    return augment_cutout(image, coords, cutout_size, max_num_cutouts, safe_reigon)
+    return augment_cutout(image, coords, cutout_size, num_cutouts, safe_reigon)
 
 
 def augment_perspective(image, coords, perspective_factor):
@@ -555,3 +555,52 @@ def augment_random_crop(image, coords, crop_size, safe_reigon=0.1):
     coords_cropped = [new_pixel_x / (crop_width - 1), new_pixel_y / (crop_height - 1)]
 
     return cropped_image, coords_cropped
+
+
+def augment_mosaic(image, coords, mosaic_size, num_mosaics=2, safe_reigon=0.1):
+    """
+    Apply mosaic (random mosaic) augmentation
+    mosaic_size should be between [0.0, 1.0] (generally between 0.0 and 0.2)
+    we first crop a random region, and then randomly blend it with the
+    original image. Then, we convert the safe region back to that part of
+    the original image.
+    """
+    height, width = image.shape[:2]
+    image_mosaic = image.copy()
+    mosaic_size_in_pixels = int(mosaic_size * min(height, width))
+    for _ in range(num_mosaics):
+        # mosaic width and height
+        mosaic_h = min(mosaic_size_in_pixels, height)
+        mosaic_w = min(mosaic_size_in_pixels, width)
+        # from
+        y_from = np.random.randint(0, height - mosaic_h + 1)
+        x_from = np.random.randint(0, width - mosaic_w + 1)
+        image_from = image_mosaic[y_from:y_from+mosaic_h, x_from:x_from+mosaic_w]
+        # to
+        y_to = np.random.randint(0, height - mosaic_h + 1)
+        x_to = np.random.randint(0, width - mosaic_w + 1)
+        image_to = image_mosaic[y_to:y_to+mosaic_h, x_to:x_to+mosaic_w]
+        # Apply mosaic
+        alpha_blend = np.random.uniform(0.2, 0.8)
+        image_mosaic[y_to:y_to+mosaic_h, x_to:x_to+mosaic_w] = (
+            image_from * alpha_blend + image_to * (1-alpha_blend)
+        )
+    # define safe region (region around the coords)
+    safe_region_half_size = int(safe_reigon * min(height, width))
+    pixel_y = round(coords[1] * (height - 1))
+    pixel_x = round(coords[0] * (width - 1))
+    x1 = max(0, pixel_x - safe_region_half_size)
+    x2 = min(width - 1, pixel_x + safe_region_half_size + 1)
+    y1 = max(0, pixel_y - safe_region_half_size) 
+    y2 = min(height - 1, pixel_y + safe_region_half_size + 1)
+    image_mosaic[y1:y2, x1:x2] = image[y1:y2, x1:x2]
+    return image_mosaic, coords
+
+
+def augment_random_mosaic(image, coords, mosaic_size_range, max_num_mosaics=2, safe_reigon=0.1):
+    """
+    apply random mosaic (between range) to the image
+    """
+    num_mosaics = np.random.randint(1, max_num_mosaics + 1)
+    mosaic_size = np.random.uniform(mosaic_size_range[0], mosaic_size_range[1])
+    return augment_mosaic(image, coords, mosaic_size, num_mosaics, safe_reigon)

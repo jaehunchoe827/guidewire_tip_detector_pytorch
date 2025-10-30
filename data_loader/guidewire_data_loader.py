@@ -211,6 +211,11 @@ class GuidewireDataSet(data.Dataset):
                             image_augmented, label_augmented,
                             **aug_params['args']
                         )
+                    elif aug_name == 'random_mosaic':
+                        image_augmented, label_augmented = aug_functions.augment_random_mosaic(
+                            image_augmented, label_augmented,
+                            **aug_params['args']
+                        )
                     elif aug_name == 'random_cutout':
                         image_augmented, label_augmented = aug_functions.augment_random_cutout(
                             image_augmented, label_augmented,
