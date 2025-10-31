@@ -1,6 +1,9 @@
 import torch
 import torch.optim as optim
 import numpy as np
+import matplotlib
+# Use a non-interactive backend to avoid Tkinter initialization in forked processes
+matplotlib.use('Agg', force=True)
 import matplotlib.pyplot as plt
 
 def generate_optimizer(model, optimizer_config):
