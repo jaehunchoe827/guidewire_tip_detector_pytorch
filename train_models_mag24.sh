@@ -10,5 +10,8 @@ python3 -m engine.main --train --config ver3_less_aug.yaml
 sleep 5
 echo "Training ver3_no_edge.yaml"
 python3 -m engine.main --train --config ver3_no_edge.yaml 
+sleep 5
+echo "Training ver3_mae.yaml"
+python3 -m engine.main --train --config ver3_mae.yaml 
 
 echo "All models trained successfully!"
