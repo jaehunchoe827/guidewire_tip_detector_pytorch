@@ -391,6 +391,168 @@ class SE(torch.nn.Module):
         return x * w
 
 
+class GuidewireDetectionHeadVer5(torch.nn.Module):
+    """
+    Coordinate-regression head using a soft-argmax over a dense logit map.
+
+    This is architecturally almost identical to GuidewireDetectionHeadVer3:
+    - Same image feature extraction
+    - Same lateral connections and SE blocks
+    - Same multi-scale fusion (160 -> 320 -> 640)
+    - Same optional edge refinement
+    - Same conv_output + 1x1 conv to 1-channel logits
+
+    The ONLY difference is in the final step:
+    - Ver3: returns a (B, H, W) heatmap (after squeeze).
+    - Ver5: applies softmax over spatial positions and computes the
+      expected (x, y) via soft-argmax, returning a (B, 2) tensor.
+
+    Coordinates can be returned normalized to [0, 1] if desired.
+    """
+
+    def __init__(self, input_image_shape: tuple, feature_channels: list,
+                 config_head: dict, from_logits: bool = True):
+        super().__init__()
+        self.nhc = config_head['num_hidden_channels']  # hidden channels
+        self.input_image_shape = input_image_shape
+        self.feature_channels = feature_channels
+        self.c3 = feature_channels[0]
+        self.c4 = feature_channels[1]
+        self.c5 = feature_channels[2]
+        self.use_se = config_head.get('use_se', False)
+        self.edge_assist = config_head.get('edge_assist', False)
+
+        # soft-argmax related options
+        # temperature controls peakiness of softmax; 1.0 = plain softmax
+        self.temperature = config_head.get('softargmax_temperature', 1.0)
+        # if True, return coords normalized to [0, 1]; else return pixel indices
+        self.normalize_coords = config_head.get('normalize_coords', True)
+
+        # image feature extraction
+        self.conv_image = torch.nn.Sequential(
+            Conv(3, 32, torch.nn.SiLU(), k=3, s=2, p=1),
+            Conv(32, 64, torch.nn.SiLU(), k=3, s=2, p=1),
+            Conv(64, self.nhc, torch.nn.SiLU(), k=3, s=1, p=1),
+        )
+        # lateral
+        self.conv_l3 = torch.nn.Sequential(
+            Conv(self.c3, self.nhc, torch.nn.SiLU(), k=1, p=0),
+            DSConv(self.nhc, self.nhc),
+        )
+        self.conv_l4 = torch.nn.Sequential(
+            Conv(self.c4, self.nhc, torch.nn.SiLU(), k=1, p=0),
+            DSConv(self.nhc, self.nhc),
+        )
+        self.conv_l5 = torch.nn.Sequential(
+            Conv(self.c5, self.nhc, torch.nn.SiLU(), k=1, p=0),
+            DSConv(self.nhc, self.nhc),
+        )
+        self.se3 = SE(self.nhc) if self.use_se else torch.nn.Identity()
+        self.se4 = SE(self.nhc) if self.use_se else torch.nn.Identity()
+        self.se5 = SE(self.nhc) if self.use_se else torch.nn.Identity()
+
+        # fuse features at 160x160
+        self.fuse160 = torch.nn.Sequential(
+            Conv(4 * self.nhc, self.nhc, torch.nn.SiLU(), k=1, p=0),
+            DSConv(self.nhc, self.nhc),
+        )
+        # decoder: 160 -> 320 -> 640
+        self.dec320 = DSConv(self.nhc, self.nhc)
+        self.dec640 = DSConv(self.nhc, self.nhc)
+
+        if self.edge_assist:
+            self.sobel = SobelMag()
+            self.edge_refine = DSConv(self.nhc + 1, self.nhc)
+
+        # conv for output logits
+        self.conv_output = DSConv(self.nhc, 64)
+        # final prediction: always from logits (Identity), since we softmax later
+        self.pred = Conv(64, 1, torch.nn.Identity(), k=1, p=0, use_norm=False)
+
+        # --- coordinate grid for soft-argmax ---
+        # Use the input_image_shape to build a (H*W,) grid for x and y
+        H, W = input_image_shape  # assuming (B, C, H, W)-like tuple
+        ys = torch.linspace(0, H - 1, H)
+        xs = torch.linspace(0, W - 1, W)
+        # meshgrid gives (H, W) tensors for y and x
+        grid_y, grid_x = torch.meshgrid(ys, xs, indexing='ij')  # (H, W)
+        # flatten to (H*W,)
+        self.register_buffer("grid_x", grid_x.reshape(-1))  # pixel indices
+        self.register_buffer("grid_y", grid_y.reshape(-1))
+
+        self.H = H
+        self.W = W
+
+    def forward(self, x):
+        # x is list of 4 tensors:
+        # [input image, feature from shallow layer, mid layer, deep layer]
+        x_image = x[0]  # (B, 3, H, W), H=W=640
+        p3 = x[1]
+        p4 = x[2]
+        p5 = x[3]
+
+        # image feature extraction
+        imf = self.conv_image(x_image)  # (B, nhc, 160, 160)
+
+        # lateral connections
+        l3 = self.se3(self.conv_l3(p3))  # (B, nhc, 80, 80)
+        l4 = self.se4(self.conv_l4(p4))  # (B, nhc, 40, 40)
+        l5 = self.se5(self.conv_l5(p5))  # (B, nhc, 20, 20)
+
+        # upsample l3, l4, l5 to 160x160
+        l3 = self.up_sample(l3, scale_factor=2)  # (B, nhc, 160, 160)
+        l4 = self.up_sample(l4, scale_factor=4)  # (B, nhc, 160, 160)
+        l5 = self.up_sample(l5, scale_factor=8)  # (B, nhc, 160, 160)
+
+        # concatenate imf, l3, l4, l5
+        features = torch.cat([imf, l3, l4, l5], dim=1)  # (B, 4*nhc, 160, 160)
+
+        # decode features
+        h160 = self.fuse160(features)             # (B, nhc, 160, 160)
+        h320 = self.dec320(self.up_sample(h160))  # (B, nhc, 320, 320)
+        h640 = self.dec640(self.up_sample(h320))  # (B, nhc, 640, 640)
+
+        if self.edge_assist:
+            edge = self.sobel(x_image)  # (B, 1, 640, 640)
+            h640 = self.edge_refine(torch.cat([h640, edge], dim=1))  # (B, nhc, 640, 640)
+
+        # conv_output + 1x1 conv to logits
+        out = self.conv_output(h640)  # (B, 64, 640, 640)
+        out = self.pred(out)          # (B, 1, 640, 640) logits
+
+        B, C, H, W = out.shape
+        assert C == 1, "Expected single-channel logit map."
+
+        # flatten to (B, H*W)
+        logits = out.view(B, -1)
+
+        # optional stabilization & temperature scaling
+        logits = logits - logits.max(dim=1, keepdim=True)[0]  # for numerical stability
+        if self.temperature != 1.0:
+            logits = logits / self.temperature
+
+        # softmax over spatial positions
+        prob = torch.softmax(logits, dim=1)  # (B, H*W)
+
+        # soft-argmax: expected x and y
+        # grid_x, grid_y have shape (H*W,), automatically on correct device as buffers
+        x = torch.sum(prob * self.grid_x.unsqueeze(0), dim=1)  # (B,)
+        y = torch.sum(prob * self.grid_y.unsqueeze(0), dim=1)  # (B,)
+
+        if self.normalize_coords:
+            x = x / (W - 1)
+            y = y / (H - 1)
+
+        coords = torch.stack([x, y], dim=1)  # (B, 2)
+
+        return coords
+
+    def up_sample(self, x, scale_factor=2):  # bilinear upsample
+        return torch.nn.functional.interpolate(x, scale_factor=scale_factor, mode='bilinear', align_corners=False)
+
+    def down_sample(self, x):  # max pooling downsample (kept for compatibility)
+        return torch.nn.functional.max_pool2d(x, kernel_size=2, stride=2)
+
 
 class GuidewireDetectionHeadVer4(torch.nn.Module):
     def __init__(self, input_image_shape: tuple, feature_channels: list, config_head: dict, from_logits: bool = True):
@@ -849,6 +1011,11 @@ class YOLOwithCustomHead(torch.nn.Module):
                                                    from_logits)
         elif config_head['version'] == 'ver4':
             self.head = GuidewireDetectionHeadVer4(input_image_shape,
+                                                   feature_channels,
+                                                   config_head,
+                                                   from_logits)
+        elif config_head['version'] == 'ver5':
+            self.head = GuidewireDetectionHeadVer5(input_image_shape,
                                                    feature_channels,
                                                    config_head,
                                                    from_logits)

@@ -1,6 +1,15 @@
 #!/bin/bash
-echo "Training ver3_less_aug_longer_epoch_2.yaml"
-python3 -m engine.main --train --config ver3_less_aug_longer_epoch_2.yaml
+echo "Training ver5_amplifier_1.yaml"
+python3 -m engine.main --train --config ver5_amplifier_1.yaml
+sleep 5
+echo "Training ver5_amplifier_10.yaml"
+python3 -m engine.main --train --config ver5_amplifier_10.yaml
+sleep 5
+echo "Training ver5_amplifier_100.yaml"
+python3 -m engine.main --train --config ver5_amplifier_100.yaml
+sleep 5
+echo "Training ver5_amplifier_1000.yaml"
+python3 -m engine.main --train --config ver5_amplifier_1000.yaml
 sleep 5
 
 echo "All models trained successfully!"

@@ -103,7 +103,9 @@ def train(config):
     with open(os.path.join(results_dir, 'config.yaml'), 'w') as f:
         yaml.dump(config, f)
 
-    criterion = GuidewireHeatMapLoss(from_logits=config['from_logits'])
+    criterion = GuidewireHeatMapLoss(from_logits=config['from_logits'],
+                                     is_output_coords=config['network']['head']['version'] == 'ver5',
+                                     loss_amplifier=config['network']['head']['loss_amplifier'])
     
     # Train
     with open(os.path.join(results_dir, 'step.csv'), 'w') as log, \
@@ -111,6 +113,9 @@ def train(config):
         # Get loss names dynamically from criterion
         dummy_output = torch.zeros(1, 1, 1, 1)  # Dummy tensor to get loss names
         dummy_target = torch.zeros(1, 1, 1, 1)
+        if config['network']['head']['version'] == 'ver5':
+            dummy_output = torch.zeros(1, 2)
+            dummy_target = torch.zeros(1, 1, 1, 1)
         dummy_losses = criterion(dummy_output, dummy_target)
         loss_names = list(dummy_losses.keys())
         
@@ -192,7 +197,7 @@ def train(config):
                     loss=f"{(loss_total.item() * accumulate):.5f}", 
                     lr=f"{current_lr:.5f}",
                     acc2=f"{losses['2%_win_acc'].item():.3f}",
-                    acc1=f"{losses['1%_win_acc'].item():.3f}"
+                    dist=f"{losses['dist'].item():.3f}"
                 )
 
                 # update global step
@@ -229,7 +234,7 @@ def train(config):
             
             print(f"Epoch {epoch}/{epochs} - val_loss_total: {val_loss_total:.6f}, "
                   f"val_acc2: {val_losses_avg.get('2%_win_acc', 0):.5f}, "
-                  f"val_acc1: {val_losses_avg.get('1%_win_acc', 0):.5f}")
+                  f"val_dist: {val_losses_avg.get('dist', 0):.5f}")
 
             # Log validation losses to CSV
             if not val_headers_written:
@@ -302,7 +307,9 @@ def test(config):
     with open(os.path.join(results_dir, 'config_test.yaml'), 'w') as f:
         yaml.dump(config, f)
 
-    criterion = GuidewireHeatMapLoss(from_logits=config['from_logits'])
+    criterion = GuidewireHeatMapLoss(from_logits=config['from_logits'],
+                                     is_output_coords=config['network']['head']['version'] == 'ver5',
+                                     loss_amplifier=config['network']['head']['loss_amplifier'])
     
     # Train
     with open(os.path.join(results_dir, 'test_loss.csv'), 'w') as test_log:        

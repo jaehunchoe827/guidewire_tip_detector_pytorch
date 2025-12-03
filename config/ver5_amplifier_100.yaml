@@ -8,12 +8,12 @@ training:
   # note that the epoch starts from 1
   epochs: 20
   batch_size: 8
-  accumulate: 2 # accumulate over 4 batches
+  accumulate: 3 # accumulate over 4 batches
   unfreeze_backbone_epochs: 2 # unfreeze backbone at the start of this epoch
-  loss_main: ["bce", "mse"]
+  loss_main: ["mse", "mae"]
   loss_weights:
-    bce: 0.9
-    mse: 0.1
+    mse: 0.5
+    mae: 0.5
   optimizer:
     name: "AdamW"
     weight_decay: 0.00001
@@ -30,7 +30,8 @@ training:
 network:
   input_image_shape: [640, 640] # height, width
   head:
-    version: "ver3"
+    version: "ver5"
+    loss_amplifier: 100.0
     num_hidden_channels: 96
     use_se: True
     edge_assist: True

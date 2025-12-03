@@ -6,14 +6,14 @@ from_logits: true
 
 training:
   # note that the epoch starts from 1
-  epochs: 30
+  epochs: 20
   batch_size: 8
   accumulate: 3 # accumulate over 4 batches
   unfreeze_backbone_epochs: 2 # unfreeze backbone at the start of this epoch
   loss_main: ["bce", "mse"]
   loss_weights:
-    bce: 0.9
-    mse: 0.1
+    bce: 0.5
+    mse: 0.5
   optimizer:
     name: "AdamW"
     weight_decay: 0.00001
@@ -31,6 +31,7 @@ network:
   input_image_shape: [640, 640] # height, width
   head:
     version: "ver3"
+    loss_amplifier: 1.0
     num_hidden_channels: 96
     use_se: True
     edge_assist: True
@@ -40,7 +41,7 @@ network:
 dataset:
   image_initial_resize_ratio: 0.8
   split_ratio: [0.8, 0.1, 0.1] # train, val, test
-  heatmap_sigma: 4.0
+  heatmap_sigma: 1.0
   sigma_xray_noise: 0.025
   augmentation:
     random_brightness:
