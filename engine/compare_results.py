@@ -16,8 +16,14 @@ import seaborn as sns
 plt.style.use('seaborn-v0_8')
 sns.set_palette("husl")
 
+# Increase all font sizes by 30% for clearer plots
+FONT_SCALE = 1.5
+DEFAULT_FONT_SIZE = plt.rcParams.get('font.size', 10)
+plt.rcParams.update({'font.size': DEFAULT_FONT_SIZE * FONT_SCALE})
+sns.set_context("notebook", font_scale=FONT_SCALE)
 
-def moving_average(data: np.ndarray, window: int = 1000) -> np.ndarray:
+
+def moving_average(data: np.ndarray, window: int = 200) -> np.ndarray:
     """Apply moving average to smooth the data."""
     if len(data) < window:
         return data
@@ -86,9 +92,9 @@ def plot_loss_comparison(results_data: Dict[str, Tuple[pd.DataFrame, pd.DataFram
     
     plt.xlabel('Step')
     plt.ylabel('Loss (log scale)')
-    plt.title('Training vs Validation Loss Comparison')
+    plt.title('Total Loss Comparison')
     plt.yscale('log')  # Use log scale for y-axis
-    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.legend(bbox_to_anchor=(0.6, 0.5), loc='upper left')
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
     
@@ -144,7 +150,7 @@ def plot_metric_comparison(results_data: Dict[str, Tuple[pd.DataFrame, pd.DataFr
             plt.yscale('log')
             plt.ylabel(f'{metric.replace("_", " ").title()} (log scale)')
         
-        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.legend(bbox_to_anchor=(0.6, 0.5), loc='upper left')
         plt.grid(True, alpha=0.3)
         plt.tight_layout()
         
@@ -174,7 +180,7 @@ def plot_lr_comparison(results_data: Dict[str, Tuple[pd.DataFrame, pd.DataFrame]
     plt.ylabel('Learning Rate (log scale)')
     plt.title('Learning Rate Comparison')
     plt.yscale('log')
-    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.legend(bbox_to_anchor=(0.6, 0.5), loc='upper left')
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
 
