@@ -24,9 +24,6 @@ from nets import nn
 from utils import util
 from utils import training_utils
 
-# warnings.filterwarnings("ignore")
-data_dir = '/home/jaehun/YOLOv11-pt-master/datasets/coco'
-
 
 def train(config):
     # create the model

@@ -1,0 +1,21 @@
+name: gwtd
+channels:
+  - defaults
+dependencies:
+  - python=3.10
+  - pip=25.3
+  - nvidia/label/cuda-12.8.1::cuda-toolkit
+  - nvidia/label/cudnn-9.7.1::cudnn
+  - pip:
+      - --index-url https://pypi.org/simple
+      - --extra-index-url https://download.pytorch.org/whl/cu128
+      - torch==2.7.1+cu128
+      - torchvision==0.22.1+cu128
+      - torchaudio==2.7.1+cu128
+      - tqdm==4.67.1
+      - numpy==2.2.6
+      - opencv-python==4.13.0.90
+      - PyYAML==6.0.3
+      - seaborn==0.13.2
+      - pandas==2.3.3
+      - matplotlib==3.10.8
