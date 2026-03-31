@@ -1,6 +1,9 @@
 # Guidewire detection network.
 This repo is implemeted based on jahongir7174's [YOLOv11-pt](https://github.com/jahongir7174/YOLOv11-pt)
 
+## TODO
+consider using pre-normalization, and layer norm instead of batch norm
+
 ### Installation
 1. create and activate conda env
 conda env create --file conda_environment.yaml

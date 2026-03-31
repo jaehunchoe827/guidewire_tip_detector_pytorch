@@ -1,5 +1,4 @@
 import torch
-import torch.optim as optim
 import numpy as np
 import matplotlib
 # Use a non-interactive backend to avoid Tkinter initialization in forked processes
