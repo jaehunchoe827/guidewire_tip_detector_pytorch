@@ -189,7 +189,7 @@ def train(config):
                     loss=f"{(loss_total.item() * accumulate):.5f}", 
                     lr=f"{current_lr:.5f}",
                     acc2=f"{losses['2%_win_acc'].item():.3f}",
-                    acc1=f"{losses['1%_win_acc'].item():.3f}"
+                    dist=f"{losses['dist'].item():.3f}"
                 )
 
                 # update global step
@@ -226,7 +226,7 @@ def train(config):
             
             print(f"Epoch {epoch}/{epochs} - val_loss_total: {val_loss_total:.6f}, "
                   f"val_acc2: {val_losses_avg.get('2%_win_acc', 0):.5f}, "
-                  f"val_acc1: {val_losses_avg.get('1%_win_acc', 0):.5f}")
+                  f"val_dist: {val_losses_avg.get('dist', 0):.5f}")
 
             # Log validation losses to CSV
             if not val_headers_written:

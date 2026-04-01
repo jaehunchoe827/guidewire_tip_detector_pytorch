@@ -101,18 +101,16 @@ def plot_loss_comparison(results_data: Dict[str, Tuple[pd.DataFrame, pd.DataFram
 def plot_metric_comparison(results_data: Dict[str, Tuple[pd.DataFrame, pd.DataFrame]], 
                           output_dir: Path):
     """Plot comparison for each metric."""
-    # Get all available metrics (excluding epoch, step, lr columns)
-    sample_step_df = next(iter(results_data.values()))[0]
-    sample_val_df = next(iter(results_data.values()))[1]
+    # Collect all metric names across every experiment (union)
+    all_step_metrics = set()
+    all_val_metrics = set()
+    for step_df, val_df in results_data.values():
+        all_step_metrics.update(col for col in step_df.columns
+                                if col not in ['epoch', 'step', 'lr', 'loss_total'])
+        all_val_metrics.update(col for col in val_df.columns
+                               if col not in ['epoch', 'val_loss_total'])
     
-    # Get metric columns
-    step_metrics = [col for col in sample_step_df.columns 
-                   if col not in ['epoch', 'step', 'lr', 'loss_total']]
-    val_metrics = [col for col in sample_val_df.columns 
-                  if col not in ['epoch', 'val_loss_total']]
-    
-    # Find common metrics
-    common_metrics = set(step_metrics) & set(val_metrics)
+    common_metrics = all_step_metrics & all_val_metrics
     
     colors = plt.cm.tab10(np.linspace(0, 1, len(results_data)))
     
@@ -121,6 +119,9 @@ def plot_metric_comparison(results_data: Dict[str, Tuple[pd.DataFrame, pd.DataFr
         
         for i, (folder_name, (step_df, val_df)) in enumerate(results_data.items()):
             color = colors[i]
+            
+            if metric not in step_df.columns or metric not in val_df.columns:
+                continue
             
             # Calculate steps per epoch
             steps_per_epoch = calculate_steps_per_epoch(step_df)

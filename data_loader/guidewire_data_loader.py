@@ -6,16 +6,8 @@ import numpy as np
 import torch
 from torch.utils import data
 from augmentation import pixel_coords as aug_functions
+from utils.standardization import standardize_image, destandardize_image
 
-'''
-todo
-
-1. normalize the image and label:
-        - For image, normalize with mean and std
-        - For label, normalize to [0, 1]
-
-2. add random masking to the image.
-'''
 
 class GuidewireDataSet(data.Dataset):
     def __init__(self, data_sample_names: list, apply_augmentation: bool = False, config: dict = None, apply_standardization: bool = True):
@@ -28,8 +20,8 @@ class GuidewireDataSet(data.Dataset):
         self.heatmap_sigma = self.config['dataset']['heatmap_sigma']
         self.sigma_xray_noise = self.config['dataset']['sigma_xray_noise']
         self.apply_standardization = apply_standardization
-        self.image_mean = np.array([0.4914, 0.4822, 0.4465])
-        self.image_std = np.array([0.2470, 0.2435, 0.2616])
+        self.image_mean = np.array([0.485, 0.456, 0.406])
+        self.image_std = np.array([0.229, 0.224, 0.225])
 
     def __len__(self):
         return len(self.data_sample_names)
@@ -72,7 +64,7 @@ class GuidewireDataSet(data.Dataset):
         image = image.reshape(image.shape[0], image.shape[1], 1)
         # standardize the image
         if self.apply_standardization:
-            image = self.standardize_image(image)
+            image = standardize_image(image)
         return image, label
     
     @staticmethod
@@ -95,38 +87,6 @@ class GuidewireDataSet(data.Dataset):
         ], dim=0)
 
         return images_tensor, labels_tensor
-
-    def standardize_image(self, image):
-        """
-        Standardize the image using mean and std
-        Args:
-            image: numpy array of shape (height, width, channels)
-        Returns:
-            standardized image: numpy array of shape (height, width, channels)
-        """
-        if image.shape[2] == 3:
-            # RGB image
-            image = (image - self.image_mean) / self.image_std
-        else:
-            # Grayscale image
-            image = (image - self.image_mean[0]) / self.image_std[0]
-        return image
-
-    def destandardize_image(self, image):
-        """
-        Destandardize the image using mean and std
-        Args:
-            image: numpy array of shape (height, width, channels)
-        Returns:
-            destandardized image: numpy array of shape (height, width, channels)
-        """
-        if image.shape[2] == 3:
-            # RGB image
-            image = image * self.image_std + self.image_mean
-        else:
-            # Grayscale image
-            image = image * self.image_std[0] + self.image_mean[0]
-        return image
 
     def convert_pixel_coord_to_heatmap(self, label):
         """

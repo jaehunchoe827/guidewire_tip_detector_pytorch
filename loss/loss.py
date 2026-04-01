@@ -20,6 +20,7 @@ class GuidewireHeatMapLoss:
             loss['2%_win_acc']: 2% window accuracy
             loss['1%_win_acc']: 1% window accuracy
             loss['0.5%_win_acc']: 0.5% window accuracy
+            loss['dist']: Distance loss
         """
         # Compute losses with consistent dtypes
         t = targets.float().clamp(min=0.0, max=1.0)
@@ -32,6 +33,8 @@ class GuidewireHeatMapLoss:
                                  reduction=self.reduction)
         loss['mae'] = self.mae_loss(outputs, targets,
                                  from_logits=self.from_logits,
+                                 reduction=self.reduction)
+        loss['dist'] = self.loss_distance(outputs, targets,
                                  reduction=self.reduction)
         loss['10%_win_acc'] = self.loss_percentage_window_accuracy(outputs, targets,
                                  window_size=0.1,
@@ -78,6 +81,44 @@ class GuidewireHeatMapLoss:
             outputs = torch.sigmoid(outputs)
         loss = torch.nn.functional.l1_loss(outputs, targets, reduction=reduction)
         return loss
+
+    def loss_distance(self, outputs, targets, reduction: str = 'mean'):
+        """
+            Loss distance:
+            The distance between the output and the target is calculated as the Euclidean distance.
+            we calculate the ditance between the tip pixel position (in the normalized coordinate)
+        """
+        
+        # Get batch size and spatial dimensions
+        batch_size = targets.shape[0]
+        height, width = targets.shape[1], targets.shape[2]
+        
+        # Find peak positions (argmax) for each sample
+        # Flatten spatial dimensions and find argmax, then convert back to 2D coordinates
+        outputs_flat = outputs.view(batch_size, -1)
+        targets_flat = targets.view(batch_size, -1)
+        
+        # Get argmax indices
+        output_argmax = torch.argmax(outputs_flat, dim=1)  # Shape: (batch_size,)
+        target_argmax = torch.argmax(targets_flat, dim=1)   # Shape: (batch_size,)
+        
+        # Convert flat indices to 2D coordinates
+        output_y = output_argmax // width
+        output_x = output_argmax % width
+        target_y = target_argmax // width
+        target_x = target_argmax % width
+
+        output_coords = torch.stack([output_x/(width-1), output_y/(height-1)], dim=1)
+        target_coords = torch.stack([target_x/(width-1), target_y/(height-1)], dim=1)
+        distances = torch.norm(output_coords - target_coords, dim=1)
+
+        # apply reduction
+        if reduction == 'mean':
+            return distances.mean()
+        elif reduction == 'sum':
+            return distances.sum()
+        elif reduction == 'none':
+            return distances
 
     def loss_percentage_window_accuracy(self, outputs, targets, window_size: float = 0.05, reduction: str = 'mean'):
         """
