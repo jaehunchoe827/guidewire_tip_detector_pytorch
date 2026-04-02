@@ -12,7 +12,9 @@ conda env create --file conda_environment.yaml
 export CUBLAS_WORKSPACE_CONFIG=:16:8
 ```
 3. please download pretrained yolo11 weights from
-[yolo11m](https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo11m.pt)
+[yolo11m](https://github.com/jahongir7174/YOLOv11-pt/releases/download/v0.0.1/v11_m.pt)
+[yolo11l](https://github.com/jahongir7174/YOLOv11-pt/releases/download/v0.0.1/v11_l.pt)
+
 
 ### Train
 * **For reproducibility**, you must uncomment the below line in utils.util.py
