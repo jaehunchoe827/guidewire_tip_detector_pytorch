@@ -112,7 +112,7 @@ def plot_metric_comparison(results_data: Dict[str, Tuple[pd.DataFrame, pd.DataFr
     
     common_metrics = all_step_metrics & all_val_metrics
     
-    colors = plt.cm.tab10(np.linspace(0, 1, len(results_data)))
+    colors = plt.cm.tab20(np.linspace(0, 1, len(results_data)))
     
     for metric in common_metrics:
         plt.figure(figsize=(12, 8))
@@ -141,7 +141,7 @@ def plot_metric_comparison(results_data: Dict[str, Tuple[pd.DataFrame, pd.DataFr
         plt.title(f'{metric.replace("_", " ").title()} Comparison')
         
         # Use log scale for loss-related metrics
-        if metric in ['bce', 'mse']:
+        if metric in ['bce', 'mse', 'mae', 'dist']:
             plt.yscale('log')
             plt.ylabel(f'{metric.replace("_", " ").title()} (log scale)')
         
